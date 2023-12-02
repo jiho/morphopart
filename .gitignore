@@ -3,3 +3,5 @@
 __pycache__/*
 # ignore R stuff
 .Rproj.user/*
+# software stuff
+params_grid.csv
