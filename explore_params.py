@@ -70,6 +70,11 @@ for i in range(params_grid.shape[0]):
     else:
         f_all = read_features(params[step_params], log)
 
+    step_params = step_params + ['n_obj_sub', 'replicate']
+    if all(params[step_params] == previous_params[step_params]):
+        log.info('	skip: data already subsampled')
+    else:
+        f_sub = subsample_features(f_all, params[step_params], log)
 
     # set params for next turn of the loop
     previous_params = params

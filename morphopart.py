@@ -60,3 +60,46 @@ def read_features(params, log):
 
     return(f_all)
 
+
+def subsample_features(f_all, params, log):
+    """Subsample features for a smaller number of objects
+
+    The goal will be to test the sensibility of the rest of the pipeline to the initial number of objects.
+
+    Args:
+        f_all (ndarray): the full array of features.
+        params (DataFrame): a one row DataFrame with named elements containing all of the above and
+            n_obj_sub (int): number of objects to subsample to test the robustness.
+            replicate (int): an index of the replicate for the subsampling.
+        log : the logger.
+
+    Returns:
+        ndarray: an array of shape nb of subsampled objects x nb of features containing the features.
+    """
+    outfile = os.path.expanduser(
+        f'~/datasets/morphopart/out/features_subset__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}.pickle'
+    )
+
+    if os.path.exists(outfile):
+        log.info('	load subsample of features')
+        with open(outfile, 'rb') as f:
+            f_sub = pkl.load(f)
+
+    else :
+        if params.n_obj_sub < f_all.shape[0]:
+            log.info('	subsample features')
+            # subsample rows
+            f_sub = f_all.sample(n=params.n_obj_sub, random_state=params.replicate)
+            # NB: the random state is defined for this to be reproducable
+            #     it depends on the replicate number (just to make sure it changes between replicates)
+            f_sub.shape
+        else:
+            log.info('	no need to subsample, copying all features')
+            f_sub = f_all
+
+        log.info('	write them to disk')
+        with open(outfile, 'wb') as f:
+            pkl.dump(f_sub, f)
+
+    return(f_sub)
+
