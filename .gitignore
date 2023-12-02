@@ -5,3 +5,4 @@ __pycache__/*
 .Rproj.user/*
 # software stuff
 params_grid.csv
+log*.tsv
