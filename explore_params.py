@@ -109,6 +109,15 @@ for i in range(params_grid.shape[0]):
     else:
         tree = hierarchize(clust['centroids'], params[step_params], log)
 
+
+
+    log.info('step 4	Evaluate clusters') # ----
+
+    if all(params[step_params] == previous_params[step_params]):
+        log.info('	skip: objects already assigned')
+    else:
+        pred_all = transform_predict(f_all, dimred, clust, tree, params[step_params], log)
+
     # set params for next turn of the loop
     previous_params = params
 
