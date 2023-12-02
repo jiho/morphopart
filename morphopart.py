@@ -266,3 +266,51 @@ def cluster(f_sub_reduced, params, log):
 
     return(output)
 
+
+def hierarchize(centroids, params, log):
+    """Build a hierachical tree of centroids
+
+    Use AgglomerativeClustering to build a hiearchical tree of centroids and compute the cluster values at all cutting levels.
+
+    Args:
+        centroids (ndarray): coordinates of the points to hierachize
+        params (DataFrame): a one row DataFrame with named elements containing all of the above and
+            linkage (str): linkage method in the agglomerative clustering (ward, complete, etc.)
+        log : the logger.
+
+    Returns:
+        tree (DataFrame): with as many rows and columns as there are initial clusters; columns are numbered from 1 and each gives the cluster membership for the corresponding number of clusters. This means column 1 contains 1 cluster, so all 0; column 2 contains 2 clusters, so either 0 or 1; column 3...; and the last column contains all different numbers corresponding to the maximum level of clusters.
+    """
+
+    outfile = os.path.expanduser(
+        f'~/datasets/morphopart/out/tree__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}.pickle'
+    )
+
+    if os.path.exists(outfile):
+        log.info('	load tree')
+        with open(outfile, 'rb') as f:
+            tree = pkl.load(f)
+
+    else :
+        log.info('	define tree of centroids')
+
+        from sklearn.cluster import AgglomerativeClustering
+        
+        # number of clusters
+        n = centroids.shape[0]
+        # NB: should be params.n_clusters_tot, but we may as well drop this dependency
+
+        tree = np.zeros([n,n]).astype(int)
+        for i in range(0,n):
+            hclust = AgglomerativeClustering(n_clusters=i+1, linkage='ward')
+            clusters = hclust.fit_predict(centroids)
+            tree[:,i] = clusters
+        tree = pd.DataFrame(tree)
+        tree.columns = np.arange(1,n+1)
+
+        log.info('	write to disk')
+        with open(outfile, 'wb') as f:
+            pkl.dump(tree, f)
+
+    return(tree)
+

@@ -99,6 +99,16 @@ for i in range(params_grid.shape[0]):
     # plt.scatter(dimred['features_reduced'][:,0], dimred['features_reduced'][:,1], s=0.5)
     # plt.scatter(clust['centroids'][:,0], clust['centroids'][:,1], s=2, c='red')
 
+
+
+    log.info('step 3	Hierarchize clusters') # ----
+
+    step_params = step_params + ['linkage']
+    if all(params[step_params] == previous_params[step_params]):
+        log.info('	skip: clusters tree already built')
+    else:
+        tree = hierarchize(clust['centroids'], params[step_params], log)
+
     # set params for next turn of the loop
     previous_params = params
 
