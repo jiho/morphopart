@@ -76,6 +76,16 @@ for i in range(params_grid.shape[0]):
     else:
         f_sub = subsample_features(f_all, params[step_params], log)
 
+
+
+    log.info('step 1	Reduce dimension') # ----
+
+    step_params = step_params + ['dim_reducer']
+    if all(params[step_params] == previous_params[step_params]):
+        log.info('	skip: data already reduced')
+    else:
+        dimred = reduce_dimension(f_sub, params[step_params], log)
+
     # set params for next turn of the loop
     previous_params = params
 

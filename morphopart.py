@@ -103,3 +103,110 @@ def subsample_features(f_all, params, log):
 
     return(f_sub)
 
+
+def reduce_dimension(f_sub, params, log):
+    """Reduce the dimension of features
+
+    Use PCA or UMAP to reduce the dimension of initial features to a more manageable number, for clustering.
+
+    Args:
+        f_sub (ndarray): an array of features.
+        params (DataFrame): a one row DataFrame with named elements containing all of the above and
+            dim_reducer (str): name of the dimensionality reduction method; PCA or UMAP are supported
+        log : the logger.
+
+    Returns:
+        dict: containing
+            - scaler: the feature scaler (mean=0 and variance=1) fitted to the data; has a .transform() method for new data
+            - dim_reducer: the dimensional reduction method fitted to the data; also has a .transform() method for new data
+            - features_reduced (ndarray): array of shape nb of objects in f_sub x nb of components retained
+    """
+    outfile = os.path.expanduser(
+        f'~/datasets/morphopart/out/dimred__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}.pickle'
+    )
+
+    if os.path.exists(outfile):
+        log.info('	load dimension reduction info')
+        with open(outfile, 'rb') as f:
+            output = pkl.load(f)
+
+    else:
+
+        log.info('	scale data')
+        from sklearn.preprocessing import StandardScaler
+        scaler = StandardScaler()
+        scaler.fit(f_sub)
+        f_sub_scaled = scaler.transform(f_sub)
+        # f_sub_scaled.shape
+        
+        log.info('	impute missing values')
+        # since we have scaled the data, we can simply replace missing values by 0
+        f_sub_scaled = np.nan_to_num(f_sub_scaled, copy=False)
+        
+        log.info('	define dimensionality reducer')
+        if params.dim_reducer == 'PCA':
+            # from sklearn.decomposition import PCA
+            # # define the number of components:
+            # #   set a maximum to 50
+            # #   keep only those bringing more than 1% more explained variance
+            # dim_reducer = PCA(n_components=50)
+            # dim_reducer.fit(f_sub_scaled)
+            # expl_var = dim_reducer.explained_variance_ratio_
+            # n_components = np.min(np.where(expl_var < 0.01))
+            #
+            # # then define the dimensionality reduction based on this number of components
+            # dim_reducer = PCA(n_components=n_components)
+
+            import cuml
+            # define the number of components:
+            #   set a maximum to 50
+            #   keep only those bringing more than 1% more explained variance
+            dim_reducer = cuml.PCA(n_components=50)
+            dim_reducer.fit(f_sub_scaled)
+            expl_var = dim_reducer.explained_variance_ratio_
+            n_components = np.min(np.where(expl_var < 0.01))
+
+            # then define the dimensionality reduction based on this number of components
+            dim_reducer = cuml.PCA(n_components=n_components)
+
+        elif params.dim_reducer == 'UMAP':
+            # define n_neighbours as a Michalis-Menten type function from the number of points
+            def umap_n_neighbours(x):
+                n_min = 10
+                n_max = 200
+                n = np.round(n_min + n_max*x / (500000+x))
+                return(n)
+            # import umap
+            # try to limit CPU usage to a given number of threads
+            # n_threads = 12
+            # os.environ['OPENBLAS_NUM_THREADS'] = str(n_threads) # NB: does not seem to do anything
+            # dim_reducer = umap.UMAP(
+            #     n_neighbors=umap_n_neighbours(f_sub.shape[0]),
+            #     n_components=4,
+            #     n_jobs=n_threads, # limit CPU usage
+            #     transform_seed=0 # for consistent transform
+            #     # low_memory=True   # in case memory gets crazy
+            # )
+            
+            import cuml
+            dim_reducer = cuml.UMAP(
+                n_neighbors=umap_n_neighbours(f_sub.shape[0]),
+                n_components=4
+            )
+        
+        else:
+            print('Unknown dimensionality reducer; crashing')
+
+        log.info('	fit dimensionality reducer')
+        dim_reducer.fit(f_sub_scaled)
+        
+        log.info('	reduce dimension of features')
+        f_sub_reduced = dim_reducer.transform(f_sub_scaled)
+
+        log.info('	write to disk')
+        output = {'scaler': scaler, 'dim_reducer': dim_reducer, 'features_reduced': f_sub_reduced}
+        with open(outfile, 'wb') as f:
+            pkl.dump(output, f)
+
+    return(output)
+
