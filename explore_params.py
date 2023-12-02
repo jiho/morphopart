@@ -86,6 +86,19 @@ for i in range(params_grid.shape[0]):
     else:
         dimred = reduce_dimension(f_sub, params[step_params], log)
 
+
+
+    log.info('step 2	Cluster to define morphs') # ----
+
+    step_params = step_params + ['n_clusters_tot']
+    if all(params[step_params] == previous_params[step_params]):
+        log.info('	skip: data already clustered')
+    else:
+        clust = cluster(dimred['features_reduced'], params[step_params], log)
+
+    # plt.scatter(dimred['features_reduced'][:,0], dimred['features_reduced'][:,1], s=0.5)
+    # plt.scatter(clust['centroids'][:,0], clust['centroids'][:,1], s=2, c='red')
+
     # set params for next turn of the loop
     previous_params = params
 

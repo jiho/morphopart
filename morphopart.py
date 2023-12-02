@@ -210,3 +210,59 @@ def reduce_dimension(f_sub, params, log):
 
     return(output)
 
+
+def cluster(f_sub_reduced, params, log):
+    """Cluster features
+
+    Use kmeans to cluster objects into a smaller number of morphs.
+
+    Args:
+        f_sub_reduced (ndarray): an array of features (or reduced dimension, for clustering to work well).
+        params (DataFrame): a one row DataFrame with named elements containing all of the above and
+            n_clusters_tot (int): number of groups to cluster the data into
+        log : the logger.
+
+    Returns:
+        dict: containing
+            - clusterer: the clustering function, fitted to the data; has a .transform() method for new data
+            - centroids (ndarray): array of shape n_clusters_tot x nb of ccolumsn in f_sub_reduced, the coordinates of the cluster centroids in the reduced space.
+    """
+    outfile = os.path.expanduser(
+        f'~/datasets/morphopart/out/clust__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}.pickle'
+    )
+
+    if os.path.exists(outfile):
+        log.info('	load cluster info')
+        with open(outfile, 'rb') as f:
+            output = pkl.load(f)
+
+    else :
+        log.info('	define clusterer')
+
+        # from sklearn.cluster import KMeans
+        # clust = KMeans(n_clusters=params.n_clusters_tot,
+        #                init='k-means++', n_init=10,
+        #                random_state=params.replicate
+        #               )
+        
+        import cuml
+        clust = cuml.KMeans(n_clusters=params.n_clusters_tot,
+                       init='scalable-k-means++', n_init=10,
+                       random_state=params.replicate
+                      )
+
+        clust.fit(f_sub_reduced)
+
+        log.info('	define cluster centroids')
+        centroids = clust.cluster_centers_
+
+        log.info('	compute cluster membership')
+        clusters = clust.predict(f_sub_reduced)
+
+        log.info('	write to disk')
+        output = {'clusterer': clust, 'centroids': centroids, 'clusters': clusters}
+        with open(outfile, 'wb') as f:
+            pkl.dump(output, f)
+
+    return(output)
+
