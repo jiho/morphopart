@@ -315,15 +315,13 @@ def hierarchize(centroids, params, log):
     return(tree)
 
 
-def transform_predict(f_all, dimred, clust, tree, params, log):
-    """Transform all features in the reduced space and predict their cluster label
+def transform_features(f_all, dimred, params, log):
+    """Transform all features in the reduced space
 
     Args:
         f_all (ndarray): features of all objects .
         dimred (dict): dimensionality reduction information, output by function reduce_dimension().
-        clust (dict): clustering information, output by function cluster().
-        tree (dict): hierachization information, output by function hierarchize().
-        params (DataFrame): a one row DataFrame with named elements containing all of the above
+        params (DataFrame): a one row DataFrame with named elements containing the nececarry parameters
         log : the logger.
 
     Returns:
@@ -331,7 +329,7 @@ def transform_predict(f_all, dimred, clust, tree, params, log):
     """
 
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out/pred__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}.pickle'
+        f'~/datasets/morphopart/out/features_all_reduced__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}.pickle'
     )
 
     if os.path.exists(outfile):
@@ -341,25 +339,18 @@ def transform_predict(f_all, dimred, clust, tree, params, log):
 
     else :
         log.info('	reduce all features based on current subsample')
+        
         f_all_scaled = dimred['scaler'].transform(f_all)
         f_all_scaled = np.nan_to_num(f_all_scaled, copy=False)
-        f_all_reduced = dimred['dim_reducer'].transform(f_all_scaled)
-        # f_all_reduced.shape
-
-        # TODO this could even be in a separate step (would sve time of only the clustering method changes and not the feature extraction... but I am lasy for now)
-        log.info('	assign reduced features to cluster')
-        # make a DataFrame with cluster level as column index
-        # NB: internally, this is likely using a nearest neighbour classifier
-        c_all = pd.DataFrame({params.n_clusters_tot: clust['clusterer'].predict(f_all_reduced)})
         
-        # TODO review this, this adds 200 columns while we do not need as many; one possibility is to do this with the appropriate params.n_clusters_eval in the next step, after loading the tree
-        log.info('	add all clusters hierarchy')
-        c_all = c_all.merge(tree, on=params.n_clusters_tot)
-        
+        # split in chunks to apply the transformation (avoid memory errors on the GPU)
+        f_all_scaled = np.vsplit(f_all_scaled, 10)
+        f_all_reduced = [dimred['dim_reducer'].transform(chunk) for chunk in f_all_scaled]
+        f_all_reduced = np.vstack(f_all_reduced)
+       
         log.info('	write to disk')
-        pred = {'features_reduced': f_all_reduced, 'clusters': c_all}
         with open(outfile, 'wb') as f:
-            pkl.dump(pred, f)
+            pkl.dump(f_all_reduced, f)
     
-    return(pred)
+    return(f_all_reduced)
  

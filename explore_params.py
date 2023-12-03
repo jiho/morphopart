@@ -113,10 +113,12 @@ for i in range(params_grid.shape[0]):
 
     log.info('step 4	Evaluate clusters') # ----
 
+    # TODO this could be done with step 1: reduce dimension of all features at the same time
+    step_param = ['instrument', 'features', 'n_obj_max', 'n_obj_sub', 'replicate', 'dim_reducer']
     if all(params[step_params] == previous_params[step_params]):
         log.info('	skip: objects already assigned')
     else:
-        pred_all = transform_predict(f_all, dimred, clust, tree, params[step_params], log)
+        pred_all = transform_features(f_all, dimred, params[step_params], log)
 
 
     # file_params = ['instrument', 'features', 'n_obj_max', 'n_obj_max', 'replicate', 'dim_reducer']
