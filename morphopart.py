@@ -317,15 +317,20 @@ def transform_features(f_all, dimred, params, log):
             f_all_reduced = pkl.load(f)
 
     else :
-        log.info('	reduce all features based on current subsample')
+        # when n_obj_sub = n_obj_max, we would do the same thing twice
+        if params['n_obj_sub'] == params['n_obj_max']:
+            log.info('	read already reduced features')
+            f_all_reduced = dimred['features_reduced']
+        else:
+            log.info('	reduce all features based on current subsample')
         
-        f_all_scaled = dimred['scaler'].transform(f_all)
-        f_all_scaled = np.nan_to_num(f_all_scaled, copy=False)
+            f_all_scaled = dimred['scaler'].transform(f_all)
+            f_all_scaled = np.nan_to_num(f_all_scaled, copy=False)
         
-        # split in chunks to apply the transformation (avoid memory errors on the GPU)
-        f_all_scaled = np.vsplit(f_all_scaled, 10)
-        f_all_reduced = [dimred['dim_reducer'].transform(chunk) for chunk in f_all_scaled]
-        f_all_reduced = np.vstack(f_all_reduced)
+            # split in chunks to apply the transformation (avoid memory errors on the GPU)
+            f_all_scaled = np.vsplit(f_all_scaled, 10)
+            f_all_reduced = [dimred['dim_reducer'].transform(chunk) for chunk in f_all_scaled]
+            f_all_reduced = np.vstack(f_all_reduced)
        
         log.info('	write to disk')
         with open(outfile, 'wb') as f:
