@@ -10,6 +10,7 @@ import pickle as pkl
 import numpy as np
 import pandas as pd
 import cuml
+import rmm
 
 def read_features(params, log):
     """Read features from a parquet file on disk
@@ -188,6 +189,8 @@ def reduce_dimension(f_sub, params, log):
         with open(outfile, 'wb') as f:
             pkl.dump(output, f)
 
+        # clean CUDA memory
+        rmm.reinitialize()
     return(output)
 
 
@@ -238,6 +241,8 @@ def cluster(f_sub_reduced, params, log):
         with open(outfile, 'wb') as f:
             pkl.dump(output, f)
 
+        # clean CUDA memory
+        rmm.reinitialize()
     return(output)
 
 
@@ -326,5 +331,8 @@ def transform_features(f_all, dimred, params, log):
         with open(outfile, 'wb') as f:
             pkl.dump(f_all_reduced, f)
     
+        # clean CUDA memory
+        rmm.reinitialize()
+        
     return(f_all_reduced)
  
