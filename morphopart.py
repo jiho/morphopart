@@ -304,7 +304,7 @@ def transform_features(f_all, dimred, params, log):
         log : the logger.
 
     Returns:
-        pred (dict): containing 'features_reduced' and 'clusters' for all objects in f_all.
+        f_all_reduced (ndarray): features in f_all reduced through dimred['dim_reducer'].
     """
 
     outfile = os.path.expanduser(
