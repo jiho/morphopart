@@ -201,8 +201,11 @@ def reduce_dimension(f_sub, params, log):
         dim_reducer.fit(f_sub_scaled)
         
         log.info('	reduce dimension of features')
-        f_sub_reduced = dim_reducer.transform(f_sub_scaled)
-
+        # split in chunks to apply the transformation (avoid memory errors on the GPU)
+        f_sub_scaled = np.vsplit(f_sub_scaled, 10)
+        f_sub_reduced = [dim_reducer.transform(chunk) for chunk in f_sub_scaled]
+        f_sub_reduced = np.vstack(f_sub_reduced)
+        
         log.info('	write to disk')
         output = {'scaler': scaler, 'dim_reducer': dim_reducer, 'features_reduced': f_sub_reduced}
         with open(outfile, 'wb') as f:
