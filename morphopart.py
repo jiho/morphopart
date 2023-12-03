@@ -335,7 +335,7 @@ def transform_features(f_all, dimred, params, log):
     if os.path.exists(outfile):
         log.info('	load full data predicted based on current subsample')
         with open(outfile, 'rb') as f:
-            pred = pkl.load(f)
+            f_all_reduced = pkl.load(f)
 
     else :
         log.info('	reduce all features based on current subsample')
