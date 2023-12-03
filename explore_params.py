@@ -80,11 +80,19 @@ for i in range(params_grid.shape[0]):
 
     log.info('step 1	Reduce dimension') # ----
 
+    # fit dimensionality reduction on the current subsample
     step_params = step_params + ['dim_reducer']
     if all(params[step_params] == previous_params[step_params]):
-        log.info('	skip: data already reduced')
+        log.info('	skip: dimensionality reduction already fitted')
     else:
         dimred = reduce_dimension(f_sub, params[step_params], log)
+
+    # use this dimensionality reduction model to reduce the full data
+    # NB: we do this as a separate step because it is long so we want to save it
+    if all(params[step_params] == previous_params[step_params]):
+        log.info('	skip: full data already reduced')
+    else:
+        f_all_reduced = transform_features(f_all, dimred, params[step_params], log)
 
 
 
@@ -92,7 +100,7 @@ for i in range(params_grid.shape[0]):
 
     step_params = step_params + ['n_clusters_tot']
     if all(params[step_params] == previous_params[step_params]):
-        log.info('	skip: data already clustered')
+        log.info('	skip: clusters already fitted')
     else:
         clust = cluster(dimred['features_reduced'], params[step_params], log)
 
@@ -113,8 +121,6 @@ for i in range(params_grid.shape[0]):
 
     log.info('step 4	Evaluate clusters') # ----
 
-    # TODO this could be done with step 1: reduce dimension of all features at the same time
-    step_param = ['instrument', 'features', 'n_obj_max', 'n_obj_sub', 'replicate', 'dim_reducer']
     if all(params[step_params] == previous_params[step_params]):
         log.info('	skip: objects already assigned')
     else:
