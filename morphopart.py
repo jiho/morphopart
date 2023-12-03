@@ -145,18 +145,6 @@ def reduce_dimension(f_sub, params, log):
         
         log.info('	define dimensionality reducer')
         if params.dim_reducer == 'PCA':
-            # from sklearn.decomposition import PCA
-            # # define the number of components:
-            # #   set a maximum to 50
-            # #   keep only those bringing more than 1% more explained variance
-            # dim_reducer = PCA(n_components=50)
-            # dim_reducer.fit(f_sub_scaled)
-            # expl_var = dim_reducer.explained_variance_ratio_
-            # n_components = np.min(np.where(expl_var < 0.01))
-            #
-            # # then define the dimensionality reduction based on this number of components
-            # dim_reducer = PCA(n_components=n_components)
-
             import cuml
             # define the number of components:
             #   set a maximum to 50
@@ -176,17 +164,6 @@ def reduce_dimension(f_sub, params, log):
                 n_max = 200
                 n = np.round(n_min + n_max*x / (500000+x))
                 return(n)
-            # import umap
-            # try to limit CPU usage to a given number of threads
-            # n_threads = 12
-            # os.environ['OPENBLAS_NUM_THREADS'] = str(n_threads) # NB: does not seem to do anything
-            # dim_reducer = umap.UMAP(
-            #     n_neighbors=umap_n_neighbours(f_sub.shape[0]),
-            #     n_components=4,
-            #     n_jobs=n_threads, # limit CPU usage
-            #     transform_seed=0 # for consistent transform
-            #     # low_memory=True   # in case memory gets crazy
-            # )
             
             import cuml
             dim_reducer = cuml.UMAP(
@@ -241,12 +218,6 @@ def cluster(f_sub_reduced, params, log):
 
     else :
         log.info('	define clusterer')
-
-        # from sklearn.cluster import KMeans
-        # clust = KMeans(n_clusters=params.n_clusters_tot,
-        #                init='k-means++', n_init=10,
-        #                random_state=params.replicate
-        #               )
         
         import cuml
         clust = cuml.KMeans(n_clusters=params.n_clusters_tot,
