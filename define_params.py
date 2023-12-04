@@ -11,17 +11,15 @@ def expand_grid(data):
 
 params = expand_grid({
     'instrument': ['uvp5sd','uvp6'],
-    'features': ['uvplib', 'mobilenet', 'dino'],
+    'features': ['mobilenet', 'uvplib', 'dino'],
     'n_obj_max': [2000000],
-    'replicate': [1, 2, 3],
+    'replicate': [1, 2, 3, 4, 5],
     'n_obj_sub': [10000, 50000, 100000, 250000, 500000, 1000000, 2000000],
-    # 'n_obj_sub': [250000, 500000, 1000000, 2000000],
     'dim_reducer': ['UMAP', 'PCA'],
-    # 'dim_reducer': ['PCA'],
     'n_clusters_tot': [200],
     'linkage': ['ward'],
-    'n_clusters_eval': [5, 20, 100, 200],
-    'n_obj_dbcv': [25000]
+    'n_clusters_eval': [5, 15, 100, 200],
+    'n_obj_eval': [15000]
 })
 
 # # test
