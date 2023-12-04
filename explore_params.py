@@ -60,7 +60,13 @@ for i in range(params_grid.shape[0]):
     params = params_grid.iloc[i]
     log.info(f'start	Start parameters set {i} : {params.to_dict()}')
 
-
+    # skip the computation if the result is already computed
+    results_file = os.path.expanduser(
+        f'~/datasets/morphopart/out/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
+    )
+    if os.path.exists(results_file):
+        log.info('	skip: everything done') # ----
+        continue
     
     log.info('step 0	Read and prepare data') # ----
 
@@ -121,52 +127,51 @@ for i in range(params_grid.shape[0]):
 
     log.info('step 4	Evaluate clusters') # ----
 
-    if all(params[step_params] == previous_params[step_params]):
-        log.info('	skip: objects already assigned')
+    ref_params = ['instrument', 'features', 'n_obj_max', 'dim_reducer']
+    # NB: we use replicate 1 all the time here
+    if all(params[ref_params] == previous_params[ref_params]):
+        log.info('	skip: reference dimensionality reduction already loaded')
     else:
-        pred_all = transform_features(f_all, dimred, params[step_params], log)
+        log.info('	load reference dimensionality reduction')
+        dimred_ref_file = os.path.expanduser(
+            '~/datasets/morphopart/out/dimred__'
+            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_1_{params.dim_reducer}'
+            '.pickle'
+        )
+        with open(dimred_ref_file, 'rb') as f:
+            dimred_ref = pkl.load(f)
 
+    ref_params = ref_params + ['n_clusters_tot']
+    if all(params[ref_params] == previous_params[ref_params]):
+        log.info('	skip: reference clustering already loaded')
+    else:
+        log.info('	load reference clustering')
+        cluster_ref_file = os.path.expanduser(
+            '~/datasets/morphopart/out/clust__'
+            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_1_{params.dim_reducer}_{params.n_clusters_tot}'
+            '.pickle'
+        )
+        with open(cluster_ref_file, 'rb') as f:
+            cluster_ref = pkl.load(f)
 
-    # file_params = ['instrument', 'features', 'n_obj_max', 'n_obj_max', 'replicate', 'dim_reducer']
-    # if all(params[file_params] == previous_params[file_params]):
-    #     log.info('    skip: reference dimensionality reduction already loaded')
-    # else:
-    #     pred_all = transform_predict(, params[step_params], log)
-    #
-    # log.info('    load reference dimensionality reduction and clusters')
-    # # = clustering based on the *full* data
-    # # TODO test if those are not allready loaded
-    # # TODO use only replicate 1? = use 1 instead of params.replicate
-    # file_params = ['instrument', 'features', 'n_obj_max', 'n_obj_max', 'replicate', 'dim_reducer']
-    # dimred_ref_file = os.path.expanduser(
-    #     f'~/datasets/morphopart/out/dimred__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}.pickle'
-    # )
-    # with open(dimred_ref_file, 'rb') as f:
-    #     dimred_ref = pkl.load(f)
-    # # get the features, for easier access
-    # f_all_reduced_ref = dimred_ref['features_reduced']
-    # f_all_reduced_ref.shape
-    #
-    # cluster_ref_file = os.path.expanduser(
-    #     f'~/datasets/morphopart/out/clust__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}.pickle'
-    # )
-    # with open(cluster_ref_file, 'rb') as f:
-    #     cluster_ref = pkl.load(f)
-    #
-    # tree_ref_file = os.path.expanduser(
-    #     f'~/datasets/morphopart/out/tree__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}.pickle'
-    # )
-    # with open(tree_ref_file, 'rb') as f:
-    #     tree_ref = pkl.load(f)
-    #
-    #
-    #
-    # step_params = step_params + ['n_clusters_eval', 'n_obj_dbcv']
-    # if all(params[step_params] == previous_params[step_params]):
-    #     log.info('    skip: evaluation already performed')
-    # else:
-    #     results = evaluate(pred_all,params[step_params], log)
-    
+    ref_params = ref_params + ['linkage']
+    if all(params[ref_params] == previous_params[ref_params]):
+        log.info('	skip: reference cluster tree already loaded')
+    else:
+        log.info('	load reference cluster tree')
+        tree_ref_file = os.path.expanduser(
+            '~/datasets/morphopart/out/tree__'
+            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_1_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}'
+            '.pickle'
+        )
+        with open(tree_ref_file, 'rb') as f:
+            tree_ref = pkl.load(f)
+
+    step_params = step_params + ['n_clusters_eval', 'n_obj_eval']
+    if all(params[step_params] == previous_params[step_params]):
+        log.info('	skip: evaluation already performed')
+    else:
+        results = evaluate(f_all_reduced, clust, tree, dimred_ref['features_reduced'], cluster_ref['clusters'], tree_ref, params[step_params], log)
  
 
     # set params for next turn of the loop

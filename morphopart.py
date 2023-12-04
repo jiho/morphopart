@@ -341,3 +341,161 @@ def transform_features(f_all, dimred, params, log):
 
     return(f_all_reduced)
 
+def fast_merge(x, y, on, **kwargs):
+    """Merge two DataFrames based on a column
+
+    This is a faster implementation of .merge()
+
+    Args:
+        x,y (DataFrame): DataFrames to merge
+        on (string, int): name/index of the column to merge on
+        **kwargs: passed on .join()
+
+    Returns:
+        x (DataFrame): x with relevant rows of y appended by the join
+    """
+    x.set_index(on, inplace=True)
+    y.set_index(on, inplace=True)
+    x = x.join(y, **kwargs)
+    x.reset_index(inplace=True)
+    return(x)
+
+
+# def stratified_sample_indexes(x, n, by=[0,1], **kwargs):
+#     """Take a sample of x stratified by some of its columns and return the row indexes
+#
+#     Args:
+#         x (ndarray): 2D array to sample rows from.
+#         n (int): number of elements to take.
+#         by (list): indices of the columns of x to stratify by.
+#         **kwargs: passed to pd.sample()
+#
+#     Returns:
+#         idx (ndarray of int): indexes of the rows of x sampled
+#     """
+#     import pandas as pd
+#     df = pd.DataFrame()
+#     # cut the stratification columns in 5 pieces
+#     for i in by:
+#         df[i] = pd.cut(x[:,i], bins=np.quantile(x[:,i], np.linspace(0, 1, 6)))
+#     df['index'] = range(x.shape[0])
+#     # compute the number of rows to sample in each piece to get n rows in total
+#     n_per_stratum = int(n / (5*5))
+#     smp = df.groupby(by, group_keys=False).apply(lambda x, **kwargs: x.sample(n_per_stratum, **kwargs) if (x.shape[0]>=n_per_stratum) else x)
+#     # get the indexes
+#     idx = smp['index'].values
+#     return(idx)
+
+def stratified_sample_indexes(x, n, by, **kwargs):
+    """Take a sample of x stratified by some of its columns and return the row indexes
+
+    Args:
+        x (ndarray): 2D array to sample rows from.
+        n (int): number of elements to take.
+        by (ndarray or list): values of the groups to stratifiy by.
+        **kwargs: passed to pd.sample()
+
+    Returns:
+        idx (ndarray of int): indexes of the rows of x sampled
+    """
+    df = pd.DataFrame(x)
+    df['strata'] = by
+    df['index'] = range(x.shape[0])
+    n_strata = len(np.unique(by))
+    n_per_stratum = int(n / n_strata)
+    smp = df.groupby('strata', group_keys=False).apply(lambda x, **kwargs: x.sample(n_per_stratum, **kwargs) if (x.shape[0]>=n_per_stratum) else x)
+    idx = smp['index'].values
+    return(idx)
+
+
+def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_ref, params, log):
+    """Evaluate this pipeline thanks to the ARI, DBCV metrics
+
+    Args:
+        f_all_reduced (ndarray): features for all objects reduced based on the dimensionality reduction fitted on the *current subsample*; output of transform_predict().
+        clust (dict): clusterer fitted on the *current subsample*; output of cluster().
+        tree (DataFrame): hierarchical tree fitted on the *current subsample*; output of tree().
+        f_all_reduced_ref (ndarray): features for all objects reduced based the *full dataset*.
+        clusters_ref (ndarray): cluster numbers for all objects based on the clusterer fitted on the *full dataset*.
+        tree_ref (DataFrame): hierarchical tree fitted on the *full dataset*
+        params (DataFrame): a one row DataFrame with named elements containing all of the above and:
+            n_clusters_eval (int): number of clusters at which to perform the evaluation.
+            n_obj_eval (int): size of the subsamples with which to estimate DBCV (using all data is much too expensive computationnally).
+        log : the logger.
+
+    Returns:
+        results (DataFrame): containing the quality metrics
+    """
+    outfile = os.path.expanduser(
+        f'~/datasets/morphopart/out/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
+    )
+    if os.path.exists(outfile):
+        # log.info('    load evaluation results')
+        # with open(outfile, 'rb') as f:
+        #     results = pd.read_csv(f)
+        log.info('	done')
+
+    else :
+        log.info('	predict cluster number of all objects in the reduced features space')
+        # make a DataFrame with cluster level as column index
+        # NB: internally, this is likely using a nearest neighbour classifier
+        c_all = pd.DataFrame({params.n_clusters_tot: clust['clusterer'].predict(f_all_reduced)})
+        # TODO this could be a separate step (would save time of only the clustering method changes and not the feature extraction... but I am lazy for now)
+
+        if params.n_clusters_eval != params.n_clusters_tot:
+            # reduce to the number of clusters requested for evaluation
+            # = merge the level of the tree with the correct number of clusters
+            log.info('	reduce to the target number of clusters')
+            c_all = fast_merge(c_all, tree[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot)
+
+        # compute metrics
+        log.info('	compute ARI score')
+        # import pdb; pdb.set_trace()
+
+        # define the reference clusters (at n_cluster_eval level)
+        c_all_ref = pd.DataFrame({params.n_clusters_tot: clusters_ref})
+        if params.n_clusters_eval != params.n_clusters_tot:
+            c_all_ref = fast_merge(c_all_ref, tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot)
+
+        from sklearn.metrics.cluster import adjusted_rand_score # = ARI score
+        score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)
+
+        # NB: returns negative values sometimes!
+        # from cuml.metrics.cluster.adjusted_rand_index import adjusted_rand_score
+        # score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)
+
+        # subsample the data for DBCV and silouhette computation (too long otherwise)
+        n_repetitions = 5
+        eval_subsamples = [stratified_sample_indexes(f_all_reduced, n=params.n_obj_eval, by=c_all[params.n_clusters_eval].values, random_state=i) for i in range(n_repetitions)]
+        # NB: another possibility is to sample the reduced space, stratified by dimensions 1 and 2
+        #     but this seeems to cause trouble for DBCV computation when one cluster only has 1 point in it
+        # indexes = [stratified_indexes(f_all_reduced, n=params.n_obj_eval, by=[0,1]) for i in range(n_rep)]
+
+        log.info('	compute DBCV')
+
+        import hdbscan
+        # or https://github.com/FelSiq/DBCV but it is slower
+        DBCVs = [hdbscan.validity.validity_index(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx], metric='euclidean') for idx in eval_subsamples]
+        # DBCVs[rep] = hdbscan.validity.validity_index(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx], metric='euclidean')
+
+        log.info('	compute Silhouette score')
+        from cuml.metrics.cluster.silhouette_score import cython_silhouette_score
+        SILs = [cython_silhouette_score(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx]) for idx in eval_subsamples]
+
+        log.info('	compute pairwise distances in reduced space')
+        DISTs = np.linalg.norm(f_all_reduced_ref - f_all_reduced, axis=0)
+
+        # TODO compute purity of labels
+
+        log.info('	write to disk')
+        results = dict(params) | {
+            'ARI': score_ARI,
+            'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
+            'SIL': np.mean(SILs), 'sdSIL': np.std(SILs),
+            'DIST': np.mean(DISTs), 'sdDIST': np.std(DISTs)
+        }
+
+        results = pd.DataFrame(results, index=[0])
+        results.to_csv(outfile, index=False)
+
+    return(results)
