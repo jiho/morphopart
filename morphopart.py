@@ -139,11 +139,11 @@ def reduce_dimension(f_sub, params, log):
         scaler.fit(f_sub)
         f_sub_scaled = scaler.transform(f_sub)
         # f_sub_scaled.shape
-        
+
         log.info('	impute missing values')
         # since we have scaled the data, we can simply replace missing values by 0
         f_sub_scaled = np.nan_to_num(f_sub_scaled, copy=False)
-        
+
         log.info('	define dimensionality reducer')
         if params.dim_reducer == 'PCA':
             import cuml
@@ -165,25 +165,25 @@ def reduce_dimension(f_sub, params, log):
                 n_max = 200
                 n = np.round(n_min + n_max*x / (500000+x))
                 return(n)
-            
+
             import cuml
             dim_reducer = cuml.UMAP(
                 n_neighbors=umap_n_neighbours(f_sub.shape[0]),
                 n_components=4
             )
-        
+
         else:
             print('Unknown dimensionality reducer; crashing')
 
         log.info('	fit dimensionality reducer')
         dim_reducer.fit(f_sub_scaled)
-        
+
         log.info('	reduce dimension of features')
         # split in chunks to apply the transformation (avoid memory errors on the GPU)
         f_sub_scaled = np.vsplit(f_sub_scaled, 10)
         f_sub_reduced = [dim_reducer.transform(chunk) for chunk in f_sub_scaled]
         f_sub_reduced = np.vstack(f_sub_reduced)
-        
+
         log.info('	write to disk')
         output = {'scaler': scaler, 'dim_reducer': dim_reducer, 'features_reduced': f_sub_reduced}
         with open(outfile, 'wb') as f:
@@ -221,7 +221,7 @@ def cluster(f_sub_reduced, params, log):
 
     else :
         log.info('	define clusterer')
-        
+
         import cuml
         clust = cuml.KMeans(n_clusters=params.n_clusters_tot,
                        init='scalable-k-means++', n_init=10,
@@ -274,7 +274,7 @@ def hierarchize(centroids, params, log):
         log.info('	define tree of centroids')
 
         from sklearn.cluster import AgglomerativeClustering
-        
+
         # number of clusters
         n = centroids.shape[0]
         # NB: should be params.n_clusters_tot, but we may as well drop this dependency
@@ -323,21 +323,21 @@ def transform_features(f_all, dimred, params, log):
             f_all_reduced = dimred['features_reduced']
         else:
             log.info('	reduce all features based on current subsample')
-        
+
             f_all_scaled = dimred['scaler'].transform(f_all)
             f_all_scaled = np.nan_to_num(f_all_scaled, copy=False)
-        
+
             # split in chunks to apply the transformation (avoid memory errors on the GPU)
             f_all_scaled = np.vsplit(f_all_scaled, 10)
             f_all_reduced = [dimred['dim_reducer'].transform(chunk) for chunk in f_all_scaled]
             f_all_reduced = np.vstack(f_all_reduced)
-       
+
         log.info('	write to disk')
         with open(outfile, 'wb') as f:
             pkl.dump(f_all_reduced, f)
-    
+
         # clean CUDA memory
         rmm.reinitialize()
-        
+
     return(f_all_reduced)
- 
+
