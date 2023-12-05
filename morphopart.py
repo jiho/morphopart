@@ -341,6 +341,7 @@ def transform_features(f_all, dimred, params, log):
 
     return(f_all_reduced)
 
+
 def fast_merge(x, y, on, **kwargs):
     """Merge two DataFrames based on a column
 
@@ -360,51 +361,90 @@ def fast_merge(x, y, on, **kwargs):
     x.reset_index(inplace=True)
     return(x)
 
+def safe_sample(x, size, **kwargs):
+    """Take a random sample of rows of a table with some conditions
+    
+    If size is larger than the number of rows of the table, just take all elements.
+    If the table has only one element, return an empty array.
+    
+    Args:
+        x (DataFrame): to sample rows from.
+        size (int): the sample size.
+        **kwargs: passed to pandas.sample() (useful for random_state for example)
+    
+    Returns:
+        smp (ndarray): the rows sampled from the DataFrame
+    """
+    import numpy as np
+    
+    nrows = x.shape[0]
+    if nrows == 1:
+        # return empty set
+        smp = x.iloc[np.arange(0, 0)]
+    elif nrows <= size:
+        # return all
+        smp = x
+    else:
+        # take sample
+        smp = x.sample(n=size, axis=0, ignore_index=False, replace=False, **kwargs)
+    return(smp)
 
-# def stratified_sample_indexes(x, n, by=[0,1], **kwargs):
-#     """Take a sample of x stratified by some of its columns and return the row indexes
-#
-#     Args:
-#         x (ndarray): 2D array to sample rows from.
-#         n (int): number of elements to take.
-#         by (list): indices of the columns of x to stratify by.
-#         **kwargs: passed to pd.sample()
-#
-#     Returns:
-#         idx (ndarray of int): indexes of the rows of x sampled
-#     """
-#     import pandas as pd
-#     df = pd.DataFrame()
-#     # cut the stratification columns in 5 pieces
-#     for i in by:
-#         df[i] = pd.cut(x[:,i], bins=np.quantile(x[:,i], np.linspace(0, 1, 6)))
-#     df['index'] = range(x.shape[0])
-#     # compute the number of rows to sample in each piece to get n rows in total
-#     n_per_stratum = int(n / (5*5))
-#     smp = df.groupby(by, group_keys=False).apply(lambda x, **kwargs: x.sample(n_per_stratum, **kwargs) if (x.shape[0]>=n_per_stratum) else x)
-#     # get the indexes
-#     idx = smp['index'].values
-#     return(idx)
 
-def stratified_sample_indexes(x, n, by, **kwargs):
-    """Take a sample of x stratified by some of its columns and return the row indexes
+def sample_stratified_by_category(n, size, by, **kwargs):
+    """Sample rows of a table stratified according to a categorical variable
 
     Args:
-        x (ndarray): 2D array to sample rows from.
-        n (int): number of elements to take.
-        by (ndarray or list): values of the groups to stratifiy by.
-        **kwargs: passed to pd.sample()
+        n (int): number of rows of the table.
+        size (int): number of elements to take.
+        by (ndarray or list): of length n, values of the categories to stratifiy by.
+        **kwargs: passed to pandas.sample()
+
+    Returns:
+        idx (ndarray): indexes of the rows sampled.
+    """
+    import pandas as pd
+    import numpy as np
+    
+    # compute number of elements to sample in each stratum
+    n_strata = len(np.unique(by))
+    n_per_stratum = int(size / n_strata)
+    # sample
+    df = pd.DataFrame({'strat': by})
+    smp = df.groupby('strat', group_keys=False).apply(safe_sample, size=n_per_stratum, **kwargs)
+    # and get indexes
+    idx = smp.index.values
+    return(idx)
+
+
+def sample_stratified_continuous(n, size, by, **kwargs):
+    """Sample rows of a table stratified according to a continuous variable
+
+    Args:
+        n (int): number of rows of the table.
+        size (int): number of elements to take.
+        by (ndarray or DataFrame): the continous variable(s) to stratify by. 
+        **kwargs: passed to pandas.sample()
 
     Returns:
         idx (ndarray of int): indexes of the rows of x sampled
     """
-    df = pd.DataFrame(x)
-    df['strata'] = by
-    df['index'] = range(x.shape[0])
-    n_strata = len(np.unique(by))
-    n_per_stratum = int(n / n_strata)
-    smp = df.groupby('strata', group_keys=False).apply(lambda x, **kwargs: x.sample(n_per_stratum, **kwargs) if (x.shape[0]>=n_per_stratum) else x)
-    idx = smp['index'].values
+    import pandas as pd
+    
+    # cut the stratification columns in 5 pieces of ~ the same size
+    bydf = pd.DataFrame(by)
+    bydf = bydf.reset_index(drop=True)
+    for i in bydf:        
+        bydf[i] = pd.cut(bydf[i], bins=np.quantile(bydf[i], np.linspace(0, 1, 6)))
+
+    # compute number of elements to sample per stratum
+    # NB: ensure there are at least 2 per stratum
+    n_per_stratum = np.max([int(size / 5**by.shape[1]), 2])
+    
+    # sample
+    smp = bydf.groupby(bydf.columns.values.tolist(), group_keys=False).apply(safe_sample, size=n_per_stratum, **kwargs)
+    # and get indexes
+    idx = smp.index.values
+    
     return(idx)
 
 
@@ -450,33 +490,43 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
 
         # compute metrics
         log.info('	compute ARI score')
-        # import pdb; pdb.set_trace()
 
         # define the reference clusters (at n_cluster_eval level)
         c_all_ref = pd.DataFrame({params.n_clusters_tot: clusters_ref})
+        # NB: if we are evaluating at n_clusters_tot, we do not need to add a column
         if params.n_clusters_eval != params.n_clusters_tot:
             c_all_ref = fast_merge(c_all_ref, tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot)
 
         from sklearn.metrics.cluster import adjusted_rand_score # = ARI score
         score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)
 
-        # NB: returns negative values sometimes!
         # from cuml.metrics.cluster.adjusted_rand_index import adjusted_rand_score
         # score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)
+        # NB: returns negative values sometimes!
 
         # subsample the data for DBCV and silouhette computation (too long otherwise)
         n_repetitions = 5
-        eval_subsamples = [stratified_sample_indexes(f_all_reduced, n=params.n_obj_eval, by=c_all[params.n_clusters_eval].values, random_state=i) for i in range(n_repetitions)]
+        # eval_subsamples = [sample_stratified_by_category(
+        #                      n=f_all_reduced.shape[0],
+        #                      size=params.n_obj_eval,
+        #                      by=c_all[params.n_clusters_eval].values,
+        #                      random_state=i)
+        #                      for i in range(n_repetitions)]
         # NB: another possibility is to sample the reduced space, stratified by dimensions 1 and 2
-        #     but this seeems to cause trouble for DBCV computation when one cluster only has 1 point in it
-        # indexes = [stratified_indexes(f_all_reduced, n=params.n_obj_eval, by=[0,1]) for i in range(n_rep)]
+        #     but it may result in all points being in the same subsample and that throws DBCV out
+        eval_subsamples = [sample_stratified_continuous(
+                             n=f_all_reduced.shape[0],
+                             size=params.n_obj_eval,
+                             by=f_all_reduced[:,[0,1]],
+                             random_state=i)
+                             for i in range(n_repetitions)]
 
-        log.info('	compute DBCV')
-
-        import hdbscan
-        # or https://github.com/FelSiq/DBCV but it is slower
-        DBCVs = [hdbscan.validity.validity_index(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx], metric='euclidean') for idx in eval_subsamples]
-        # DBCVs[rep] = hdbscan.validity.validity_index(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx], metric='euclidean')
+        # log.info('    compute DBCV')
+        # import ipdb; ipdb.set_trace()
+        #
+        # import hdbscan
+        # # or https://github.com/FelSiq/DBCV but it is slower
+        # DBCVs = [hdbscan.validity.validity_index(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx], metric='euclidean') for idx in eval_subsamples]
 
         log.info('	compute Silhouette score')
         from cuml.metrics.cluster.silhouette_score import cython_silhouette_score
@@ -485,17 +535,23 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
         log.info('	compute pairwise distances in reduced space')
         DISTs = np.linalg.norm(f_all_reduced_ref - f_all_reduced, axis=0)
 
-        # TODO compute purity of labels
+        # TODO compute purity of labels ?
 
         log.info('	write to disk')
         results = dict(params) | {
             'ARI': score_ARI,
-            'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
+            # record the actual number in the subsample used for the evaluation
+            # (there can be fewer than params.n_obj_eval if there are small clusters)
+            'n_obj_eval_actual': len(eval_subsamples[0]),
+            # 'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
             'SIL': np.mean(SILs), 'sdSIL': np.std(SILs),
             'DIST': np.mean(DISTs), 'sdDIST': np.std(DISTs)
         }
 
         results = pd.DataFrame(results, index=[0])
         results.to_csv(outfile, index=False)
+    
+    # clean CUDA memory
+    rmm.reinitialize()
 
     return(results)
