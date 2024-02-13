@@ -127,15 +127,16 @@ for i in range(params_grid.shape[0]):
 
     log.info('step 4	Evaluate clusters') # ----
 
-    ref_params = ['instrument', 'features', 'n_obj_max', 'dim_reducer']
+    ref_params = ['instrument', 'features', 'n_obj_max', 'replicate', 'dim_reducer']
     # NB: we use replicate 1 all the time here
+    # TODO this change from replicate 1 to others means the ARI score is not always 1; check if sample is done with or without replacement
     if all(params[ref_params] == previous_params[ref_params]):
         log.info('	skip: reference dimensionality reduction already loaded')
     else:
         log.info('	load reference dimensionality reduction')
         dimred_ref_file = os.path.expanduser(
             '~/datasets/morphopart/out/dimred__'
-            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_1_{params.dim_reducer}'
+            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}'
             '.pickle'
         )
         with open(dimred_ref_file, 'rb') as f:
@@ -148,7 +149,7 @@ for i in range(params_grid.shape[0]):
         log.info('	load reference clustering')
         cluster_ref_file = os.path.expanduser(
             '~/datasets/morphopart/out/clust__'
-            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_1_{params.dim_reducer}_{params.n_clusters_tot}'
+            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}'
             '.pickle'
         )
         with open(cluster_ref_file, 'rb') as f:
@@ -161,7 +162,7 @@ for i in range(params_grid.shape[0]):
         log.info('	load reference cluster tree')
         tree_ref_file = os.path.expanduser(
             '~/datasets/morphopart/out/tree__'
-            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_1_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}'
+            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}'
             '.pickle'
         )
         with open(tree_ref_file, 'rb') as f:
