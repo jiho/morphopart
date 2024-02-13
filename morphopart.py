@@ -12,6 +12,12 @@ import pandas as pd
 import cuml
 import rmm
 
+
+def extract_features(params, log):
+    # TODO add the code to extract features here
+    # TODO the read_features function should therefore be included here, to read them when they have already been extracted
+    return(None)
+
 def read_features(params, log):
     """Read features from a parquet file on disk
 
