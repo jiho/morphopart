@@ -532,8 +532,16 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
         # DBCVs = [hdbscan.validity.validity_index(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx], metric='euclidean') for idx in eval_subsamples]
 
         log.info('	compute Silhouette score')
-        from cuml.metrics.cluster.silhouette_score import cython_silhouette_score
-        SILs = [cython_silhouette_score(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx]) for idx in eval_subsamples]
+        # import ipdb; ipdb.set_trace()
+        def safe_silhouette_score(X, labels):
+            from cuml.metrics.cluster.silhouette_score import cython_silhouette_score
+            import numpy as np
+            if len(np.unique(labels))==1:
+                score = float('NaN')
+            else:
+                score = cython_silhouette_score(X, labels)
+            return(score)
+        SILs = [safe_silhouette_score(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx]) for idx in eval_subsamples]
 
         log.info('	compute pairwise distances in reduced space')
         DISTs = np.linalg.norm(f_all_reduced_ref - f_all_reduced, axis=0)
