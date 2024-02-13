@@ -395,7 +395,6 @@ def safe_sample(x, size, **kwargs):
         smp = x.sample(n=size, axis=0, ignore_index=False, replace=False, **kwargs)
     return(smp)
 
-
 def sample_stratified_by_category(n, size, by, **kwargs):
     """Sample rows of a table stratified according to a categorical variable
 
@@ -420,7 +419,6 @@ def sample_stratified_by_category(n, size, by, **kwargs):
     # and get indexes
     idx = smp.index.values
     return(idx)
-
 
 def sample_stratified_continuous(n, size, by, **kwargs):
     """Sample rows of a table stratified according to a continuous variable
@@ -452,7 +450,6 @@ def sample_stratified_continuous(n, size, by, **kwargs):
     idx = smp.index.values
     
     return(idx)
-
 
 def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_ref, params, log):
     """Evaluate this pipeline thanks to the ARI, DBCV metrics
