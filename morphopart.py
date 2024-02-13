@@ -537,6 +537,7 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
 
         log.info('	compute pairwise distances in reduced space')
         DISTs = np.linalg.norm(f_all_reduced_ref - f_all_reduced, axis=0)
+        # TODO this cannot work in the PCA case since the PCA that produces the _ref one is fitted on the full dataset while the other is fitted on the subset. They may not have the same number of components
 
         # TODO compute purity of labels ?
 
@@ -548,6 +549,7 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
             'n_obj_eval_actual': len(eval_subsamples[0]),
             # 'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
             'SIL': np.mean(SILs), 'sdSIL': np.std(SILs),
+            # TODO count nans, exlude them and compute without them
             'DIST': np.mean(DISTs), 'sdDIST': np.std(DISTs)
         }
 
