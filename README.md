@@ -65,7 +65,13 @@ In addition `morphopart.py` contains utility functions
 
 ### Technical aspects
 
-Many functions use rapids.ai. The installation is easier with conda and an `environment.yml` file to create the appropriate conda environment is included.
+Many functions use rapids.ai. The installation is easier with conda and an `environment.yml` file to create the appropriate conda environment is included. The commands are
+
+```
+conda env create -f environment.yml
+conda activate rapids_12 
+conda env list
+```
 
 The code is version controlled with git.
 
