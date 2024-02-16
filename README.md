@@ -65,13 +65,25 @@ In addition `morphopart.py` contains utility functions
 
 ### Technical aspects
 
-Many functions use rapids.ai. The installation is easier with conda and an `environment.yml` file to create the appropriate conda environment is included. The commands are
+Many functions use [cuML](https://docs.rapids.ai/api/cuml/stable/) from rapids.ai. The installation is easier with conda and an `environment.yml` file to create the appropriate conda environment is included. The commands are
 
 ```
+conda activate base
 conda env create -f environment.yml
-conda activate rapids_12 
 conda env list
+conda activate morphopart
 ```
+
+An alternative, that may work if you are on an Ubuntu 20.04 system is
+
+```
+conda activate base
+conda create --name morphopart --file environment_explicit.txt
+conda env list
+conda activate morphopart
+```
+
+
 
 The code is version controlled with git.
 
