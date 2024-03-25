@@ -13,9 +13,43 @@ import cuml
 import rmm
 
 
-def extract_features(params, log):
+def get_features(directory, params, log):
     # TODO add the code to extract features here
     # TODO the read_features function should therefore be included here, to read them when they have already been extracted
+    outfile = os.path.expanduser(
+        f'~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet'
+    )
+
+    if os.path.exists(outfile):
+        log.info(' features already extracted')
+        f_all=read_features(params,log)
+    else :
+        log.info(' extract all features')
+        if params.features=='uvplib':
+            arr = os.listdir(directory+'/'+ params.instrument[0]+'/orig_imgs'); arr = [directory+'/'+ params.instrument[0]+'/orig_imgs/{x}' for x in arr]
+            imagefilename=np.array(arr)
+            # init features list
+            features = list()
+            # init filepath
+            filepath = list()
+            for i, path in enumerate(imagefilename):
+                F =get_uvplib_features(path, params)  
+                if len(F) > 0:  # test if feature extraction succeeded before appending to dataset
+                    features.append(F)
+                    filepath.append(path)
+            dataset = pd.DataFrame(features)
+            dataset['filename'] = filepath
+            dataset_features = pd.DataFrame(features, index=dataset['objid'])
+            dataset_features = dataset_features.rename(columns=str) # parquet need strings as column names
+            
+            dataset_features.to_parquet('~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet')
+        elif params.features=='mobilenet':
+            dataset_features=get_mobilenet_features(directory, params, log)
+            
+            dataset_features.to_parquet('~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet')
+        else:
+            print("unknown features extraction")
+    return(dataset)
     return(None)
 
 def read_features(params, log):
