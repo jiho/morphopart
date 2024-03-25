@@ -14,8 +14,21 @@ import rmm
 
 
 def get_features(directory, params, log):
-    # TODO add the code to extract features here
-    # TODO the read_features function should therefore be included here, to read them when they have already been extracted
+    """Extract features from original images
+
+    Extract features.
+
+    Args:
+        directory: directory of the instruments that contain the original images
+        params (DataFrame): a one row DataFrame with named elements containing:
+            instrument (str): name of the instrument that took the images.
+            features (str): name of the feature extractor.
+                both of the arguments above determine the file to read.
+        log : the logger.
+
+    Returns:
+        ndarray: an array of shape nb of objects x nb of features containing the features.
+    """
     outfile = os.path.expanduser(
         f'~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet'
     )
@@ -24,7 +37,7 @@ def get_features(directory, params, log):
         log.info(' features already extracted')
         f_all=read_features(params,log)
     else :
-        log.info(' extract all features')
+        log.info(' extract features')
         if params.features=='uvplib':
             arr = os.listdir(directory+'/'+ params.instrument[0]+'/orig_imgs'); arr = [directory+'/'+ params.instrument[0]+'/orig_imgs/{x}' for x in arr]
             imagefilename=np.array(arr)
