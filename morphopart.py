@@ -35,7 +35,7 @@ def get_features(directory, params, log):
 
     if os.path.exists(outfile):
         log.info(' features already extracted')
-        f_all=read_features(params,log)
+        dataset_features=read_features(params,log)
     else :
         log.info(' extract features')
         if params.features=='uvplib':
