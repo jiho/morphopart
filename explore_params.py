@@ -39,6 +39,7 @@ log.addHandler(console_handler)
 log.addHandler(file_handler)
 
 
+directory= '~/datasets/morphopart'
 
 ## Define parameters ----
 
@@ -68,13 +69,13 @@ for i in range(params_grid.shape[0]):
         log.info('	skip: everything done') # ----
         continue
     
-    log.info('step 0	Read and prepare data') # ----
+    log.info('step 0	Extract, read and prepare data') # ----
 
     step_params = ['instrument', 'features', 'n_obj_max']
     if all(params[step_params] == previous_params[step_params]):
         log.info('	skip: data already read')
     else:
-        f_all = read_features(params[step_params], log)
+        f_all = get_features(directory, params[step_params], log)
 
     step_params = step_params + ['n_obj_sub', 'replicate']
     if all(params[step_params] == previous_params[step_params]):
