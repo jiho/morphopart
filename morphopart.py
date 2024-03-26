@@ -46,7 +46,7 @@ def get_features(directory, params, log):
             # init filepath
             filepath = list()
             for i, path in enumerate(imagefilename):
-                F =get_uvplib_features(path, params)  
+                F =get_uvplib_features(path, params, log)  
                 if len(F) > 0:  # test if feature extraction succeeded before appending to dataset
                     features.append(F)
                     filepath.append(path)
@@ -57,6 +57,8 @@ def get_features(directory, params, log):
             
             dataset_features.to_parquet('~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet')
         elif params.features=='mobilenet':
+            log.info('	write them to disk')
+            
             dataset_features=get_mobilenet_features(directory, params, log)
             
             dataset_features.to_parquet('~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet')
@@ -614,3 +616,483 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
     rmm.reinitialize()
 
     return(results)
+
+
+def get_uvplib_features(imagefilename, params, log):
+    """  
+    -        -
+    Parameters
+    ----------
+    imagefilename : str
+        Name of the image file containing the object for features extraction.
+        
+    params (DataFrame): a one row DataFrame with named elements containing:
+        instrument (str): name of the instrument that took the images.
+        features (str): name of the feature extractor.
+            both of the arguments above determine the file to read.
+        n_obj_max (int): maximum number of obejcts to consider. If more are available from the file, subsample it to reduce the number. This will be considered as "all" the objects for the purpose of the analysis.
+
+    Returns
+    -------
+    features : OrderedDict
+        Ordered Dictionary containing the features extracted from biggest
+        connected region found in image.
+        An empty OrderedDict is returned if no regions found.
+    """
+    #Package
+    import imageio as iio
+    import uvpec 
+    from skimage import io, measure
+    from numpy import argmax, histogram
+    from math import sqrt, atan2
+    from collections import OrderedDict
+    from cython_uvp6 import py_get_features
+    
+    # load image file
+    try :
+        img = io.imread(imagefilename)    
+    except :
+        print("get_uvplib_features function : Failed to open file", imagefilename)
+        return OrderedDict()
+    
+    # because images had 3 identical bands and uvpec was designed for grey-one-band images, we only keep one "layer"
+    if params.instrument == 'uvp5hd':
+        img = img[:,:,0] # TO INCLUDE FOR UVP5 IMAGES; exclude for uvp6
+        threshold=4
+        use_C=False
+    elif params.instrument == 'uvp5sd':
+        img = img[:,:,0] # TO INCLUDE FOR UVP5 IMAGES; exclude for uvp6
+        threshold=8
+        use_C=False
+    elif params.instrument == 'uvp6':
+        threshold=21
+        use_C=True
+        
+    # crop the scale bar
+    height = img.shape[0]
+    img = img[0:(height-31),:]
+
+    # invert the image (white over black)
+    img_black = 255 - img #np.invert(img)
+
+    # reassign black image to image
+    img = img_black
+    
+    # apply thresholding 
+    thresh_img = img > threshold
+    if thresh_img.sum() < 1 : # there are no pixels above the threshold, return empty dict
+        print("get_uvp6_features function : No objects found in", 
+              imagefilename, "with threshold", threshold)
+        return OrderedDict()
+    
+    # segmentation into connected regions 
+    label_img = measure.label(thresh_img)
+    
+    # get region properties for connected regions found
+    props = measure.regionprops(label_img, img)
+    
+    # get index of the region presenting the biggest area in square pixels
+    Areas = list()
+    for region in props:
+        Areas.append(region.area)        
+    max_area_idx=argmax(Areas)
+    region = props[max_area_idx]
+    
+    if use_C is True:
+        # execute C code
+        cfeatures = py_get_features(img, region, threshold)
+        
+        # build an output ordered dict with the features vector
+        # ATTENTION : feature insertion order is VERY important,
+        # as it has to match exactly the feature order used on UVP6
+        features = OrderedDict()
+        features["area"] = cfeatures[0]
+        features["width"] = cfeatures[1]
+        features["height"] = cfeatures[2]
+        features["mean"] = cfeatures[3]
+        features["stddev"] = cfeatures[4]
+        features["mode"] = cfeatures[5]
+        features["min"] = cfeatures[6]
+        features["max"] = cfeatures[7]
+        features["x"] = cfeatures[8]
+        features["y"] = cfeatures[9]
+        features["xm"] = cfeatures[10]
+        features["ym"] = cfeatures[11]
+        features["major"] = cfeatures[12]
+        features["minor"] = cfeatures[13]
+        features["angle"] = cfeatures[14]
+        features["eccentricity"] = cfeatures[15]
+        features["intden"] = cfeatures[16]
+        features["median"] = cfeatures[17]
+        features["histcum1"] = cfeatures[18]
+        features["histcum3"] = cfeatures[19]
+        features["esd"] = cfeatures[20]
+        features["range"] = cfeatures[21]
+        features["meanpos"] = cfeatures[22]
+        features["cv"] = cfeatures[23]
+        features["sr"] = cfeatures[24]
+        features["bbox_area"] = cfeatures[25]
+        features["extent"] = cfeatures[26]
+
+        features["central_moment-2-0"] = cfeatures[27]
+        features["central_moment-1-1"] = cfeatures[28]
+        features["central_moment-0-2"] = cfeatures[29]
+        features["central_moment-3-0"] = cfeatures[30]
+        features["central_moment-2-1"] = cfeatures[31]
+        features["central_moment-1-2"] = cfeatures[32]
+        features["central_moment-0-3"] = cfeatures[33]
+    
+        features["hu_moment-1"] = cfeatures[34]
+        features["hu_moment-2"] = cfeatures[35]
+        features["hu_moment-3"] = cfeatures[36]
+        features["hu_moment-4"] = cfeatures[37]
+        features["hu_moment-5"] = cfeatures[38]
+        features["hu_moment-6"] = cfeatures[39]
+        features["hu_moment-7"] = cfeatures[40]
+
+        features["gray_central_moment-2-0"] = cfeatures[41]
+        features["gray_central_moment-1-1"] = cfeatures[42]
+        features["gray_central_moment-0-2"] = cfeatures[43]
+        features["gray_central_moment-3-0"] = cfeatures[44]
+        features["gray_central_moment-2-1"] = cfeatures[45]
+        features["gray_central_moment-1-2"] = cfeatures[46]
+        features["gray_central_moment-0-3"] = cfeatures[47]
+
+        features["gray_hu_moment-1"] = cfeatures[48]
+        features["gray_hu_moment-2"] = cfeatures[49]
+        features["gray_hu_moment-3"] = cfeatures[50]
+        features["gray_hu_moment-4"] = cfeatures[51]
+        features["gray_hu_moment-5"] = cfeatures[52]
+        features["gray_hu_moment-6"] = cfeatures[53]
+        features["gray_hu_moment-7"] = cfeatures[54]
+        
+        return (features)
+
+    else:
+        # get gray values histogram for this region, and clear the 0 bin (background pixels)
+        hist = histogram(region.intensity_image, bins=256, range=(0,256))[0]
+        hist[0] = 0
+    
+        # calculate histogram related features
+        mean = region.mean_intensity
+        vmin = region.min_intensity
+        vmax = region.max_intensity
+        intden = region.weighted_moments_central[0][0] # this is the sum of all pixel values
+        mode = argmax(hist)
+        vrange = vmax - vmin
+        meanpos = (mean - vmin)/vrange
+    
+        # get quartiles, and accumulate squared pixels values for stddev calculation
+        nb_pixels = region.area
+        first_quartile = 0.25 * nb_pixels
+        second_quartile = 0.5 * nb_pixels
+        third_quartile = 0.75 * nb_pixels
+    
+        square_gray_acc = 0; pix_acc = 0
+        median = -1; histcum1 = -1; histcum3 = -1
+    
+        for gray_level, count in enumerate(hist) :
+            if count != 0 : 
+                square_gray_acc += count*gray_level*gray_level
+                pix_acc += count
+                if (histcum1 == -1) and (pix_acc > first_quartile) : histcum1 = gray_level
+                if (median == -1) and (pix_acc > second_quartile) : median = gray_level
+                if (histcum3 == -1) and (pix_acc > third_quartile) : histcum3 = gray_level            
+   
+        stddev = sqrt((square_gray_acc/nb_pixels) - (mean*mean))    
+        cv = 100*(stddev/mean)
+        sr = 100*(stddev/vrange)
+    
+        angle = 0.5 * atan2(2*region.moments_central[1][1], (region.moments_central[0][2] - region.moments_central[2][0]))
+    
+        # build an output ordered dict with the features vector
+        # ATTENTION : feature insertion order is VERY important,
+        # as it has to match exactly the feature order used on UVP6    
+        features = OrderedDict()
+        features["area"] = nb_pixels
+        features["width"] = region.bbox[3] - region.bbox[1]
+        features["height"] = region.bbox[2] - region.bbox[0]
+        features["mean"] = mean
+        features["stddev"] = stddev
+        features["mode"] = mode
+        features["min"] = vmin
+        features["max"] = vmax
+        features["x"] = region.local_centroid[1]
+        features["y"] = region.local_centroid[0]
+        features["xm"] = region.weighted_local_centroid[1]
+        features["ym"] = region.weighted_local_centroid[0]
+        features["major"] = region.major_axis_length
+        features["minor"] = region.minor_axis_length    
+        features["angle"] = angle
+        features["eccentricity"] = region.eccentricity
+        features["intden"] = intden
+        features["median"] = median
+        features["histcum1"] = histcum1
+        features["histcum3"] = histcum3
+        features["esd"] = region.equivalent_diameter
+        features["range"] = vrange
+        features["meanpos"] = meanpos
+        
+        features["cv"] = cv
+        features["sr"] = sr
+        features["bbox_area"] = region.bbox_area
+        features["extent"] = region.extent
+    
+        features["central_moment-2-0"] = region.moments_central[0][2]
+        features["central_moment-1-1"] = region.moments_central[1][1]
+        features["central_moment-0-2"] = region.moments_central[2][0]
+        features["central_moment-3-0"] = region.moments_central[0][3]
+        features["central_moment-2-1"] = region.moments_central[1][2]
+        features["central_moment-1-2"] = region.moments_central[2][1]
+        features["central_moment-0-3"] = region.moments_central[3][0]
+    
+        """
+        Current SciKit Hu Moments implementation is apparently wrong !
+        (bad coordinate system convention rc <-> xy)
+        It only has an impact on the sign of seventh Hu moment (mirroring)
+        This is why we're inverting the sign here for hu_moment-7
+        
+        """
+        features["hu_moment-1"] = region.moments_hu[0]
+        features["hu_moment-2"] = region.moments_hu[1]
+        features["hu_moment-3"] = region.moments_hu[2]
+        features["hu_moment-4"] = region.moments_hu[3]
+        features["hu_moment-5"] = region.moments_hu[4]
+        features["hu_moment-6"] = region.moments_hu[5]
+        features["hu_moment-7"] = - region.moments_hu[6] # see comment above
+    
+        features["gray_central_moment-2-0"] = region.weighted_moments_central[0][2]
+        features["gray_central_moment-1-1"] = region.weighted_moments_central[1][1]
+        features["gray_central_moment-0-2"] = region.weighted_moments_central[2][0]
+        features["gray_central_moment-3-0"] = region.weighted_moments_central[0][3]
+        features["gray_central_moment-2-1"] = region.weighted_moments_central[1][2]
+        features["gray_central_moment-1-2"] = region.weighted_moments_central[2][1]
+        features["gray_central_moment-0-3"] = region.weighted_moments_central[3][0]
+    
+        features["gray_hu_moment-1"] = region.weighted_moments_hu[0]
+        features["gray_hu_moment-2"] = region.weighted_moments_hu[1]
+        features["gray_hu_moment-3"] = region.weighted_moments_hu[2]
+        features["gray_hu_moment-4"] = region.weighted_moments_hu[3]
+        features["gray_hu_moment-5"] = region.weighted_moments_hu[4]
+        features["gray_hu_moment-6"] = region.weighted_moments_hu[5]
+        features["gray_hu_moment-7"] = - region.weighted_moments_hu[6] # see comment above
+    
+        return(features)
+
+def training_model_mobilenet(directory, params, log):
+    
+       from deep import tensorflow_tricks  # settings for tensorflow to behave nicely
+
+       import pandas as pd
+       # pd.set_option('display.max_columns', None)
+       import numpy as np
+       import tensorflow as tf
+       from sklearn import metrics
+
+       from importlib import reload
+       from deep import dataset            # custom data generator
+       from deep import cnn                # custom functions for CNN generation
+       dataset = reload(dataset)
+       cnn = reload(cnn)
+       
+       exec(open('set_cnn_option.py').read()) 
+       # prevent HDF file locking to be able to write on complex
+       # needed to save checkpoints
+       os.system("export HDF5_USE_FILE_LOCKING='FALSE'")
+
+       print('Prepare datasets') ## ----
+       # read DataFrame with image ids, paths and labels
+       # NB: those would be in the database in EcoTaxa
+
+       # read labels
+       # TODO swap the comments in the next two lines for tests
+       df = pd.read_csv(data_dir + '/taxa.csv.gz', usecols = ['objid','taxon'], nrows=10000)
+       #df = pd.read_csv(data_dir + '/taxa.csv.gz', usecols = ['objid','taxon'])
+
+       df = df.rename(columns={'taxon': 'label'})
+       # compute path to images
+       df['img_path'] = [data_dir + '/orig_imgs/' + str(objid) + '.' + img_format for objid in df['objid']]
+       print('  training from ' + str(df.shape[0]) + ' objects')
+
+       # extract a small validation set
+       seed = 1
+       # 95% in train
+       df_train = df.groupby('label').sample(frac=0.85, random_state=seed)
+       # the rest in val
+       df_valid   = df.loc[list(set(df.index) - set(df_train.index))]
+
+       # count nb of examples per class in the training set
+       class_counts = df_train.groupby('label').size()
+       # print(class_counts)
+
+       # list classes
+       classes = class_counts.index.to_list()
+
+       # generate categories weights
+       # i.e. a dict with format { class number : class weight }
+       if use_class_weight:
+           max_count = np.max(class_counts)
+           class_weights = {}
+           for idx,count in enumerate(class_counts.items()):
+               class_weights.update({idx : (max_count / count[1])**weight_sensitivity})
+       else:
+           class_weights = None
+
+       # define numnber of  classes to train on
+       nb_of_classes = len(classes)
+
+       # define data generators
+       train_batches = dataset.EcoTaxaGenerator(
+           images_paths=df_train['img_path'].values,
+           input_shape=input_shape,
+           labels=df_train['label'].values, classes=classes,
+           batch_size=batch_size, augment=augment, shuffle=True,
+           crop=[0,0,bottom_crop,0])
+
+       valid_batches = dataset.EcoTaxaGenerator(
+           images_paths=df_valid['img_path'].values,
+           input_shape=input_shape,
+           labels=df_valid['label'].values, classes=classes,
+           batch_size=batch_size, augment=False, shuffle=False,
+           crop=[0,0,bottom_crop,0])
+       # NB: do not shuffle or augment data for validation, it is useless
+
+       print('Prepare model') ## ----
+       # try loading the model from a previous training checkpoint
+       my_cnn,initial_epoch = cnn.Load(ckpt_dir)
+
+       # if nothing is loaded this means the model was never trained
+       # in this case, define it
+       if (my_cnn is not None) :
+           print('  restart from model trained until epoch ' + str(initial_epoch))
+       else :
+           print('  define model')
+           # define CNN
+           my_cnn = cnn.Create(
+               # feature extractor
+               fe_url=fe_url,
+               input_shape=input_shape,
+               fe_trainable=fe_trainable,
+               # fully connected layer(s)
+               fc_layers_sizes=fc_layers_sizes,
+               fc_layers_dropout=fc_layers_dropout,
+               # classification layer
+               classif_layer_size=nb_of_classes,
+               classif_layer_dropout=classif_layer_dropout
+           )
+
+           print('  compile model')
+           # compile CNN
+           my_cnn = cnn.Compile(
+               my_cnn,
+               initial_lr=initial_lr,
+               lr_method=lr_method,
+               decay_steps=len(train_batches),
+               decay_rate=decay_rate,
+               loss=loss
+           )
+
+       print('Train model') ## ----
+
+       # train CNN
+       history = cnn.Train(
+           model=my_cnn,
+           train_batches=train_batches,
+           valid_batches=valid_batches,
+           epochs=epochs,
+           initial_epoch=initial_epoch,
+           log_frequency=log_frequency,
+           class_weight=class_weights,
+           output_dir=ckpt_dir,
+           workers=workers
+       )
+
+def mobilenet_feature_extractor(directory, params, log):
+    import matplotlib.pyplot as plt # science packages
+    import tensorflow as tf
+    from importlib import reload
+    from deep import dataset            # custom data generator
+    from deep import cnn                # custom functions for CNN generation
+    dataset = reload(dataset)
+    cnn = reload(cnn)
+    
+    os.system("export HDF5_USE_FILE_LOCKING='FALSE'")
+    
+    exec(open('set_cnn_option.py').read()) 
+    outfile = os.path.expanduser(ckpt_dir + '/training_log.tsv')
+    
+    if os.path.exists(outfile):
+        print('Model and feature extractor already exist') ## ---- 
+        df = pd.read_csv(ckpt_dir + '/training_log.tsv', sep='\t')
+    else:
+        training_model_mobilenet(directory, params, log)
+        # Lis le log de l'entrainement et fais un plot. Tu veux que la val_loss et val_accuracy saturent
+        df = pd.read_csv(ckpt_dir + '/training_log.tsv', sep='\t')
+    df = df.drop(['batch', 'learning_rate'], axis='columns')
+
+    df.plot(x='step', subplots=True)
+    plt.show()
+
+    df.plot(x='epoch', subplots=True)
+    plt.show()
+    # define best_epoch
+    # Il faut choisir l'epoch de val_loss minimale et val_accuracy maximale.
+    
+    best_epoch = input("Enter the best epoch (use None to get the latest epoch): ")
+    # Create Model and features extraction
+    print('Create model and feature extractor') ## ----    
+    # load model for best epoch
+    my_cnn,epoch = cnn.Load(ckpt_dir, epoch=int(best_epoch))
+    print(' at epoch {:d}'.format(epoch))
+    # save model (just in case)
+    my_cnn.save(cnn_dir + '/best_model', include_optimizer=False)
+    # drop the last two layers to get a feature extractor + the middle MLP layer
+    my_fe = tf.keras.models.Sequential([layer for layer in my_cnn.layers[0:-2] ])
+    my_fe.summary()
+
+    # save feature extractor (just in case)
+    my_fe.save(cnn_dir + '/feature_extractor')
+                                                                    
+def get_mobilenet_features(directory, params, log):
+    import tensorflow as tf
+    from deep import progress # custom functions to track progress of training/prediction
+    from deep import dataset            # custom data generator
+    import pandas as pd
+    
+    exec(open('set_cnn_option.py').read()) 
+    outfile = os.path.expanduser(cnn_dir + '/feature_extractor')
+    
+    if os.path.exists(outfile):
+        print('Load data and extract features') ## ----
+        my_fe = tf.keras.models.load_model(cnn_dir + '/feature_extractor', compile=False)
+    else:
+        my_fe = mobilenet_feature_extractor(directory, params, log) ######
+        my_fe = tf.keras.models.load_model(cnn_dir + '/feature_extractor', compile=False)   
+    # get model input shape
+    input_shape = my_fe.layers[0].input_shape
+    # remove the None element at the start (which is where the batch size goes)
+    input_shape = tuple(x for x in input_shape if x is not None)
+
+    # TODO swap the comments in the next two lines for tests
+    df = pd.read_csv(data_dir + '/taxa.csv.gz', usecols = ['objid','taxon'], nrows=10)
+    #df = pd.read_csv(data_dir + '/taxa.csv.gz', usecols = ['objid','taxon'])
+    df = df.rename(columns={'taxon': 'label'})
+    # compute path to images
+    df['img_path'] = [data_dir + '/orig_imgs/' + str(objid) + '.' + img_format for objid in df['objid']]
+    print('  found ' + str(df.shape[0]) + ' objects')
+
+    batches = dataset.EcoTaxaGenerator(
+        images_paths=df['img_path'].values,
+        input_shape=input_shape,
+        # NB: although the labels are in the file, we don't use them here
+        labels=None, classes=None,
+        batch_size=batch_size, augment=False, shuffle=False,
+        crop=[0,0,bottom_crop,0])
+
+    # extract features by going through the batches
+    features = my_fe.predict(batches, callbacks=[progress.TQDMPredictCallback()],
+                                  max_queue_size=max(10, workers*2), workers=workers)
+    dataset_features = pd.DataFrame(features, index=df['objid'])
+    dataset_features = dataset_features.rename(columns=str) # parquet need strings as column names
+    
+    return(dataset_features)
