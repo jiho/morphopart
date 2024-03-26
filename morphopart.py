@@ -62,8 +62,7 @@ def get_features(directory, params, log):
             dataset_features.to_parquet('~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet')
         else:
             print("unknown features extraction")
-    return(dataset)
-    return(None)
+    return(dataset_features)
 
 def read_features(params, log):
     """Read features from a parquet file on disk
@@ -105,7 +104,7 @@ def read_features(params, log):
             del features
         else:
             f_all = features
-        f_all = f_all.set_index('objid')
+        #f_all = f_all.set_index('objid')
         # f_all.shape
 
         log.info('	write them to disk')
