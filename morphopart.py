@@ -29,6 +29,7 @@ def get_features(directory, params, log):
     Returns:
         ndarray: an array of shape nb of objects x nb of features containing the features.
     """
+    # TODO add DINO feature extraction and sub sample before feature extraction
     outfile = os.path.expanduser(
         f'~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet'
     )
