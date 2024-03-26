@@ -74,6 +74,15 @@ conda env list
 conda activate morphopart
 ```
 
+To add a module to the environment
+
+```
+conda activate morphopart
+conda install name_of_the_module
+conda env export > environment.yml
+```
+
+
 An alternative, that may work if you are on an Ubuntu 20.04 system is
 
 ```
@@ -83,7 +92,13 @@ conda env list
 conda activate morphopart
 ```
 
+To add a module to the environment, the principle is the same
 
+```
+conda activate morphopart
+conda install name_of_the_module
+conda list --explicit > environment_explicit.txt
+```
 
 The code is version controlled with git.
 
