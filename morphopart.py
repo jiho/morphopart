@@ -597,6 +597,8 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
         # TODO this cannot work in the PCA case since the PCA that produces the _ref one is fitted on the full dataset while the other is fitted on the subset. They may not have the same number of components
 
         # TODO compute purity of labels ?
+        from sklearn.metrics.cluster import homogeneity_score
+        homogeneity_score=homogeneity_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)
 
         log.info('	write to disk')
         results = dict(params) | {
