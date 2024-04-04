@@ -532,7 +532,6 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
         # make a DataFrame with cluster level as column index
         # NB: internally, this is likely using a nearest neighbour classifier
         c_all = pd.DataFrame({params.n_clusters_tot: clust['clusterer'].predict(f_all_reduced)})
-        # TODO this could be a separate step (would save time of only the clustering method changes and not the feature extraction... but I am lazy for now)
 
         if params.n_clusters_eval != params.n_clusters_tot:
             # reduce to the number of clusters requested for evaluation
