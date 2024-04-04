@@ -592,8 +592,17 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
         SILs = [safe_silhouette_score(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx]) for idx in eval_subsamples]
 
         log.info('	compute pairwise distances in reduced space')
-        DISTs = np.linalg.norm(f_all_reduced_ref - f_all_reduced, axis=0)
-        # TODO this cannot work in the PCA case since the PCA that produces the _ref one is fitted on the full dataset while the other is fitted on the subset. They may not have the same number of components
+        # PCA that produces the _ref one is fitted on the full dataset while the other is fitted on the subset. They may not have the same number of components.
+        # The number of components is fixed to the lower number components between the full dataset and the subset.
+        n_axis_ref=np.shape(f_all_reduced_ref)[1]
+        n_axis=np.shape(f_all_reduced)[1]
+        print(n_axis_ref, n_axis)
+        if n_axis_ref != n_axis:
+            fix_axis=min(n_axis_ref,n_axis)
+            DISTs = np.linalg.norm(f_all_reduced_ref[:,0:fix_axis] - f_all_reduced[:,0:fix_axis], axis=0)
+        else:
+            DISTs = np.linalg.norm(f_all_reduced_ref - f_all_reduced, axis=0)
+
 
         # TODO compute purity of labels ?
         from sklearn.metrics.cluster import homogeneity_score
