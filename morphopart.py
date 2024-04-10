@@ -609,7 +609,7 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
             DISTs = np.linalg.norm(f_all_reduced_ref - f_all_reduced, axis=0)
 
         # TODO compute purity of labels ?
-        clust_diversity_indices=[[cluster_id, diversity_index(list(c_all[c_all[5]==cluster_id]["taxon"]))] for cluster_id in np.unique(c_all[5].values)]
+        clust_diversity_indices=[[cluster_id, diversity_index(list(c_all[c_all[params.n_clusters_eval]==cluster_id]["taxon"]))] for cluster_id in np.unique(c_all[params.n_clusters_eval].values)]
         print(clust_diversity_indices)
 
         log.info('	write to disk')
