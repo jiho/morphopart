@@ -619,8 +619,10 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
             # (there can be fewer than params.n_obj_eval if there are small clusters)
             'n_obj_eval_actual': len(eval_subsamples[0]),
             # 'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
-            'SIL': np.mean(SILs), 'sdSIL': np.std(SILs),
-            # TODO count nans, exlude them and compute without them
+            if sum(np.isnan(SILs))>0:                              # count nans, exlude them and compute without them
+                'SIL': np.mean([~np.isnan(SILs)]), 'sdSIL': np.std([~np.isnan(SILs)]), 'nanSIL': sum(np.isnan(SILs))
+            else:
+                'SIL': np.mean(SILs), 'sdSIL': np.std(SILs), 'nanSIL': sum(np.isnan(SILs))
             'DIST': np.mean(DISTs), 'sdDIST': np.std(DISTs)
         }
 
