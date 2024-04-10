@@ -499,7 +499,7 @@ def sample_stratified_continuous(n, size, by, **kwargs):
     
     return(idx)
 
-def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_ref, params, log):
+def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_ref, params, log):
     """Evaluate this pipeline thanks to the ARI, DBCV metrics
 
     Args:
@@ -530,7 +530,11 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
         log.info('	predict cluster number of all objects in the reduced features space')
         # make a DataFrame with cluster level as column index
         # NB: internally, this is likely using a nearest neighbour classifier
-        df = pd.read_csv( '~/datasets/morphopart/uvp5hd/taxa.csv.gz', usecols = ['objid','taxon'])#{params.instrument}
+        df = pd.read_csv( '~/datasets/morphopart/{params.instrument}/taxa.csv.gz', usecols = ['objid','taxon'])
+        if params.features=='uvplib':
+            f_all=f_all.set_index(f_all["objid"])
+        else:
+            print("index f_all done")
         df= df[np.isin(df["objid"].values, f_all.index.values)]
         df=df.set_index(df["objid"])
         df=df.reindex(f_all.index)    
@@ -613,18 +617,26 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
         print(clust_diversity_indices)
 
         log.info('	write to disk')
-        results = dict(params) | {
-            'ARI': score_ARI,
-            # record the actual number in the subsample used for the evaluation
-            # (there can be fewer than params.n_obj_eval if there are small clusters)
-            'n_obj_eval_actual': len(eval_subsamples[0]),
-            # 'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
-            if sum(np.isnan(SILs))>0:                              # count nans, exlude them and compute without them
-                'SIL': np.mean([~np.isnan(SILs)]), 'sdSIL': np.std([~np.isnan(SILs)]), 'nanSIL': sum(np.isnan(SILs))
-            else:
-                'SIL': np.mean(SILs), 'sdSIL': np.std(SILs), 'nanSIL': sum(np.isnan(SILs))
-            'DIST': np.mean(DISTs), 'sdDIST': np.std(DISTs)
-        }
+        if sum(np.isnan(SILs))>0:
+            results = dict(params) | {
+                'ARI': score_ARI,
+                # record the actual number in the subsample used for the evaluation
+                # (there can be fewer than params.n_obj_eval if there are small clusters)
+                'n_obj_eval_actual': len(eval_subsamples[0]),
+                # 'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
+                'SIL': np.mean([~np.isnan(SILs)]), 'sdSIL': np.std([~np.isnan(SILs)]), 'nanSIL': sum(np.isnan(SILs)),
+                'DIST': np.mean(DISTs), 'sdDIST': np.std(DISTs)
+            }
+        else:
+            results = dict(params) | {
+                'ARI': score_ARI,
+                # record the actual number in the subsample used for the evaluation
+                # (there can be fewer than params.n_obj_eval if there are small clusters)
+                'n_obj_eval_actual': len(eval_subsamples[0]),
+                # 'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
+                'SIL': np.mean(SILs), 'sdSIL': np.std(SILs), 'nanSIL': sum(np.isnan(SILs)),
+                'DIST': np.mean(DISTs), 'sdDIST': np.std(DISTs)
+            }
 
         results = pd.DataFrame(results, index=[0])
         results.to_csv(outfile, index=False)
