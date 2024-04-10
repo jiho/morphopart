@@ -40,7 +40,7 @@ def get_features(directory, params, log):
     else :
         log.info(' extract features')
         if params.features=='uvplib':
-            arr = os.listdir(directory+'/'+ params.instrument[0]+'/orig_imgs'); arr = [directory+'/'+ params.instrument[0]+'/orig_imgs/{x}' for x in arr]
+            arr = os.listdir('/home/jiho/datasets/morphopart/'+ params.instrument +'/orig_imgs'); arr = [f'/home/jiho/datasets/morphopart/'+ params.instrument +'/orig_imgs/'+x for x in arr]
             imagefilename=np.array(arr)
             # init features list
             features = list()
@@ -59,7 +59,6 @@ def get_features(directory, params, log):
             dataset_features.to_parquet('~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet')
         elif params.features=='mobilenet':
             log.info('	write them to disk')
-            
             dataset_features=get_mobilenet_features(directory, params, log)
             
             dataset_features.to_parquet('~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet')
@@ -531,7 +530,13 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
         log.info('	predict cluster number of all objects in the reduced features space')
         # make a DataFrame with cluster level as column index
         # NB: internally, this is likely using a nearest neighbour classifier
+        df = pd.read_csv( '~/datasets/morphopart/uvp5hd/taxa.csv.gz', usecols = ['objid','taxon'])#{params.instrument}
+        df= df[np.isin(df["objid"].values, f_all.index.values)]
+        df=df.set_index(df["objid"])
+        df=df.reindex(f_all.index)    
+        
         c_all = pd.DataFrame({params.n_clusters_tot: clust['clusterer'].predict(f_all_reduced)})
+        c_all["taxon"]=df["taxon"].values
 
         if params.n_clusters_eval != params.n_clusters_tot:
             # reduce to the number of clusters requested for evaluation
@@ -603,10 +608,9 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
         else:
             DISTs = np.linalg.norm(f_all_reduced_ref - f_all_reduced, axis=0)
 
-
         # TODO compute purity of labels ?
-        from sklearn.metrics.cluster import homogeneity_score
-        homogeneity_score=homogeneity_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)
+        clust_diversity_indices=[[cluster_id, diversity_index(list(c_all[c_all[5]==cluster_id]["taxon"]))] for cluster_id in np.unique(c_all[5].values)]
+        print(clust_diversity_indices)
 
         log.info('	write to disk')
         results = dict(params) | {
@@ -628,6 +632,24 @@ def evaluate(f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_r
 
     return(results)
 
+def diversity_index(list_input):
+    "Calculate Shannon and Simpson indices"
+    import math
+    unique_base = set(list_input)
+    M   =  len(list_input)
+    entropy_list = []
+    P_i_list = []
+    for base in unique_base:
+        n_i = list_input.count(base)
+        P_i = n_i/float(M)
+        entropy_i = P_i*(math.log(P_i))
+        entropy_list.append(entropy_i)
+        P_i_list.append(P_i**2)
+        
+    sh_entropy = -(sum(entropy_list))
+    Si_index= 1/(sum(P_i_list))
+
+    return (sh_entropy, Si_index)
 
 def get_uvplib_features(imagefilename, params, log):
     """  
