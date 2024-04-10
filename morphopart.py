@@ -530,7 +530,7 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
         log.info('	predict cluster number of all objects in the reduced features space')
         # make a DataFrame with cluster level as column index
         # NB: internally, this is likely using a nearest neighbour classifier
-        df = pd.read_csv( '~/datasets/morphopart/{params.instrument}/taxa.csv.gz', usecols = ['objid','taxon'])
+        df = pd.read_csv( '~/datasets/morphopart/'+params.instrument+'/taxa.csv.gz', usecols = ['objid','taxon'])
         if params.features=='uvplib':
             f_all=f_all.set_index(f_all["objid"])
         else:
