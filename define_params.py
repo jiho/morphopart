@@ -41,3 +41,24 @@ params = expand_grid({
 print(f'Defined {params.shape[0]} combinations of parameters')
 
 params.to_csv('params_grid.csv', index=False)
+
+
+def expand_grid(data):
+    import pandas as pd
+    import itertools
+    rows = itertools.product(*data.values())
+    return(pd.DataFrame.from_records(rows, columns=data.keys()))
+
+
+params = expand_grid({
+    'instrument': ['uvp5hd'],
+    'features': ['mobilenet','uvplib'],
+    'n_obj_max': [250000],
+    'replicate': [1],
+    'n_obj_sub': [250000, 100000],
+    'dim_reducer': ['UMAP', 'PCA'],
+    'n_clusters_tot': [200],
+    'linkage': ['ward'],
+    'n_clusters_eval': [5, 15],
+    'n_obj_eval': [15000]
+})

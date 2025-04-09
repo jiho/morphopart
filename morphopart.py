@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import cuml
 import rmm
-
+import re
 
 def get_features(directory, params, log):
     """Extract features from original images
@@ -31,39 +31,61 @@ def get_features(directory, params, log):
     """
     # TODO add DINO feature extraction and sub sample before feature extraction
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet'
+        f'~/datasets/morphopart/features/'+params.instrument+'/features_'+params.features+'.parquet'
     )
 
     if os.path.exists(outfile):
         log.info(' features already extracted')
-        dataset_features=read_features(params,log)
+        log.info(' read all features')
+        file = f'~/datasets/morphopart/features/'+params.instrument+'/features_'+params.features+'.parquet'
+        dataset_features = pd.read_parquet(file)
     else :
         log.info(' extract features')
+        image_dir='/home/jiho/datasets/morphopart/'+ params.instrument +'/orig_imgs'
+        arr = os.listdir(image_dir);
+        obj_id=[re.match(r'(.*)\.jpg', f).group(1) for f in arr]
+        # Sub-sample raw data if the original dataset is too large
+        if params.n_obj_max < len(obj_id):
+            # Sub-sample
+            df_sub_all=pd.DataFrame(arr)
+            df_sub_all=df_sub_all.sample(n=params.n_obj_max, random_state=0)
+            df_sub_all = df_sub_all[0].values.tolist()
+            
+            arr=df_sub_all
+            obj_id=[re.match(r'(.*)\.jpg', f).group(1) for f in df_sub_all]
+        else:
+            print(' extraction all raw data')
+
         if params.features=='uvplib':
-            arr = os.listdir('/home/jiho/datasets/morphopart/'+ params.instrument +'/orig_imgs'); arr = [f'/home/jiho/datasets/morphopart/'+ params.instrument +'/orig_imgs/'+x for x in arr]
             imagefilename=np.array(arr)
             # init features list
             features = list()
             # init filepath
             filepath = list()
             for i, path in enumerate(imagefilename):
-                F =get_uvplib_features(path, params, log)  
+                F =get_uvplib_features(image_dir+'/'+path, params, log)  
                 if len(F) > 0:  # test if feature extraction succeeded before appending to dataset
                     features.append(F)
                     filepath.append(path)
             dataset = pd.DataFrame(features)
             dataset['filename'] = filepath
-            dataset_features = pd.DataFrame(features, index=dataset['objid'])
+            dataset_features = pd.DataFrame(features, index=obj_id)
             dataset_features = dataset_features.rename(columns=str) # parquet need strings as column names
-            
-            dataset_features.to_parquet('~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet')
-        elif params.features=='mobilenet':
+        
             log.info('	write them to disk')
+            dataset_features.to_parquet('~/datasets/morphopart/features/'+params.instrument+'/features_'+params.features+'.parquet')
+                        
+        elif params.features=='mobilenet':
+            #TODO Should we also limit the mobilenet extraction ?
+            os.makedirs('features/'+params.instrument, exist_ok=True)
+            ##
             dataset_features=get_mobilenet_features(directory, params, log)
+            log.info('	write them to disk')
+            dataset_features.to_parquet('~/datasets/morphopart/features/'+params.instrument+'/features_'+params.features+'.parquet')
             
-            dataset_features.to_parquet('~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet')
         else:
             print("unknown features extraction")
+            
     return(dataset_features)
 
 def read_features(params, log):
@@ -521,10 +543,10 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
         f'~/datasets/morphopart/out/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
     )
     if os.path.exists(outfile):
-        # log.info('    load evaluation results')
-        # with open(outfile, 'rb') as f:
-        #     results = pd.read_csv(f)
-        log.info('	done')
+         log.info('    load evaluation results')
+         with open(outfile, 'rb') as f:
+             results = pd.read_csv(f)
+         log.info('	done')
 
     else :
         log.info('	predict cluster number of all objects in the reduced features space')
@@ -942,11 +964,48 @@ def training_model_mobilenet(directory, params, log):
        dataset = reload(dataset)
        cnn = reload(cnn)
        
-       exec(open('set_cnn_option.py').read()) 
-       # prevent HDF file locking to be able to write on complex
-       # needed to save checkpoints
-       os.system("export HDF5_USE_FILE_LOCKING='FALSE'")
+       ########################## set_cnn_option ##########################################
+       uvp_type = params.instrument
+       data_dir=directory+'/'+params.instrument
+       # image format
+       if params.instrument=="uvp6":
+           img_format = 'png'
+       else:
+           img_format='jpg'
+       
+       ## Data generator (see dataset.EcoTaxaGenerator)
+       batch_size = 256  # increase until GPU memory is saturated
+       augment = True
+       upscale = True
+       bottom_crop = 31
+       fe_url = 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_128/feature_vector/5'
+       input_shape = (128, 128, 3)
+       # input_shape = (224, 224, 3)
+       fe_trainable = True
+       fc_layers_sizes = [384]
+       fc_layers_dropout = 0.4
+       classif_layer_dropout = 0.2
 
+       ## CNN training (see cnn.Train)
+       use_class_weight = True
+       weight_sensitivity = 0.5  # 0.5 = sqrt
+       lr_method = 'decay'
+       initial_lr = 0.0005
+       decay_rate = 0.97
+       loss = 'cce'
+       epochs = 20 # or 20
+       log_frequency = 2   # how many times to log per epoch
+       workers = 10
+       
+       # directory to save training checkpoints
+       cnn_dir = directory +'/cnn_mobilenet_v2_035_128_5_384/'+uvp_type
+       ckpt_dir = cnn_dir + '/checkpoints'
+
+       # create checkpoints dir if it does not exist
+       os.makedirs('cnn_mobilenet_v2_035_128_5_384/'+uvp_type, exist_ok=True)
+       os.makedirs('cnn_mobilenet_v2_035_128_5_384/'+uvp_type+'/checkpoints', exist_ok=True)
+       ######################################################################################
+       
        print('Prepare datasets') ## ----
        # read DataFrame with image ids, paths and labels
        # NB: those would be in the database in EcoTaxa
@@ -1060,14 +1119,24 @@ def mobilenet_feature_extractor(directory, params, log):
     from importlib import reload
     from deep import dataset            # custom data generator
     from deep import cnn                # custom functions for CNN generation
+    import tf_keras as keras
     dataset = reload(dataset)
     cnn = reload(cnn)
     
-    os.system("export HDF5_USE_FILE_LOCKING='FALSE'")
+    ########################## set_cnn_option ##########################################
+    uvp_type = params.instrument
+    data_dir=directory+'/'+params.instrument
     
-    exec(open('set_cnn_option.py').read()) 
+    # directory to save training checkpoints
+    cnn_dir = directory +'/cnn_mobilenet_v2_035_128_5_384/'+uvp_type
+    ckpt_dir = cnn_dir + '/checkpoints'
+
+    # create checkpoints dir if it does not exist
+    os.makedirs('cnn_mobilenet_v2_035_128_5_384/'+uvp_type, exist_ok=True)
+    os.makedirs('cnn_mobilenet_v2_035_128_5_384/'+uvp_type+'/checkpoints', exist_ok=True)
+    ######################################################################################
+    
     outfile = os.path.expanduser(ckpt_dir + '/training_log.tsv')
-    
     if os.path.exists(outfile):
         print('Model and feature extractor already exist') ## ---- 
         df = pd.read_csv(ckpt_dir + '/training_log.tsv', sep='\t')
@@ -1077,51 +1146,76 @@ def mobilenet_feature_extractor(directory, params, log):
         df = pd.read_csv(ckpt_dir + '/training_log.tsv', sep='\t')
     df = df.drop(['batch', 'learning_rate'], axis='columns')
 
-    df.plot(x='step', subplots=True)
-    plt.show()
+    #df.plot(x='step', subplots=True)
+    #plt.show()
 
-    df.plot(x='epoch', subplots=True)
-    plt.show()
+    #df.plot(x='epoch', subplots=True)
+    #plt.show()
     # define best_epoch
     # Il faut choisir l'epoch de val_loss minimale et val_accuracy maximale.
+    print(df)
     
     best_epoch = input("Enter the best epoch (use None to get the latest epoch): ")
     # Create Model and features extraction
     print('Create model and feature extractor') ## ----    
     # load model for best epoch
-    my_cnn,epoch = cnn.Load(ckpt_dir, epoch=int(best_epoch))
+    if best_epoch=='' or best_epoch=='None':
+        my_cnn,epoch = cnn.Load('cnn_mobilenet_v2_035_128_5_384/'+params.instrument+'/checkpoints/')
+    else:
+        my_cnn,epoch = cnn.Load('cnn_mobilenet_v2_035_128_5_384/'+params.instrument+'/checkpoints/', epoch=int(best_epoch))
     print(' at epoch {:d}'.format(epoch))
     # save model (just in case)
-    my_cnn.save(cnn_dir + '/best_model', include_optimizer=False)
+    my_cnn.save('cnn_mobilenet_v2_035_128_5_384/'+params.instrument+'/best_model', include_optimizer=False)
     # drop the last two layers to get a feature extractor + the middle MLP layer
-    my_fe = tf.keras.models.Sequential([layer for layer in my_cnn.layers[0:-2] ])
+    my_fe = keras.models.Sequential([layer for layer in my_cnn.layers[0:-2] ])
     my_fe.summary()
 
     # save feature extractor (just in case)
-    my_fe.save(cnn_dir + '/feature_extractor')
+    my_fe.save('cnn_mobilenet_v2_035_128_5_384/'+params.instrument+'/feature_extractor')
                                                                     
 def get_mobilenet_features(directory, params, log):
     import tensorflow as tf
     from deep import progress # custom functions to track progress of training/prediction
     from deep import dataset            # custom data generator
     import pandas as pd
+    import tf_keras as keras
     
-    exec(open('set_cnn_option.py').read()) 
-    outfile = os.path.expanduser(cnn_dir + '/feature_extractor')
+    ########################## set_cnn_option ##########################################
+    uvp_type = params.instrument
+    data_dir=directory+'/'+params.instrument
+    # image format
+    if params.instrument=="uvp6":
+        img_format = 'png'
+    else:
+        img_format='jpg'
+    
+    batch_size = 256  # increase until GPU memory is saturated
+    bottom_crop = 31
+    workers = 10
+    
+    # directory to save training checkpoints
+    cnn_dir = directory +'/cnn_mobilenet_v2_035_128_5_384/'+uvp_type
+    ckpt_dir = cnn_dir + '/checkpoints'
+
+    # create checkpoints dir if it does not exist
+    os.makedirs('cnn_mobilenet_v2_035_128_5_384/'+uvp_type, exist_ok=True)
+    os.makedirs('cnn_mobilenet_v2_035_128_5_384/'+uvp_type+'/checkpoints', exist_ok=True)
+    ######################################################################################
+    outfile = os.path.expanduser('cnn_mobilenet_v2_035_128_5_384/'+params.instrument+'/feature_extractor')
     
     if os.path.exists(outfile):
         print('Load data and extract features') ## ----
-        my_fe = tf.keras.models.load_model(cnn_dir + '/feature_extractor', compile=False)
+        my_fe = keras.models.load_model('cnn_mobilenet_v2_035_128_5_384/'+params.instrument+'/feature_extractor', compile=False)
     else:
         my_fe = mobilenet_feature_extractor(directory, params, log) ######
-        my_fe = tf.keras.models.load_model(cnn_dir + '/feature_extractor', compile=False)   
+        my_fe = keras.models.load_model('cnn_mobilenet_v2_035_128_5_384/'+params.instrument+'/feature_extractor', compile=False)   
     # get model input shape
     input_shape = my_fe.layers[0].input_shape
     # remove the None element at the start (which is where the batch size goes)
     input_shape = tuple(x for x in input_shape if x is not None)
 
     # TODO swap the comments in the next two lines for tests
-    df = pd.read_csv(data_dir + '/taxa.csv.gz', usecols = ['objid','taxon'], nrows=10)
+    df = pd.read_csv(data_dir + '/taxa.csv.gz', usecols = ['objid','taxon'], nrows=10000)
     #df = pd.read_csv(data_dir + '/taxa.csv.gz', usecols = ['objid','taxon'])
     df = df.rename(columns={'taxon': 'label'})
     # compute path to images
