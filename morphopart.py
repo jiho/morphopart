@@ -67,7 +67,8 @@ def get_features(directory, params, log):
         else :
             log.info(' extract features')
             # image directory
-            image_dir='/home/jiho/datasets/morphopart/'+params.instrument+'/orig_imgs/'
+            #image_dir='/home/jiho/datasets/morphopart/all/'+params.instrument+'/orig_imgs/'
+            image_dir='/home/jiho/datasets/morphopart/all/UVP5SD/'
             arr = os.listdir(image_dir);
             # image format
             if params.instrument=="uvp6":
