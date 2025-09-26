@@ -31,62 +31,95 @@ def get_features(directory, params, log):
     """
     # TODO add DINO feature extraction and sub sample before feature extraction
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/features/'+params.instrument+'/features_'+params.features+'.parquet'
+        f'~/datasets/morphopart/out_yeo/features_all__{params.instrument}_{params.features}_{params.n_obj_max}.pickle'
     )
 
     if os.path.exists(outfile):
         log.info(' features already extracted')
-        log.info(' read all features')
-        file = f'~/datasets/morphopart/features/'+params.instrument+'/features_'+params.features+'.parquet'
-        dataset_features = pd.read_parquet(file)
+        log.info(' load features')
+        with open(outfile, 'rb') as f:
+            f_all = pkl.load(f)    
     else :
-        log.info(' extract features')
-        image_dir='/home/jiho/datasets/morphopart/'+ params.instrument +'/orig_imgs'
-        arr = os.listdir(image_dir);
-        obj_id=[re.match(r'(.*)\.jpg', f).group(1) for f in arr]
-        # Sub-sample raw data if the original dataset is too large
-        if params.n_obj_max < len(obj_id):
-            # Sub-sample
-            df_sub_all=pd.DataFrame(arr)
-            df_sub_all=df_sub_all.sample(n=params.n_obj_max, random_state=0)
-            df_sub_all = df_sub_all[0].values.tolist()
+        outfile1 = os.path.expanduser(
+            f'~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet'
+        )
+        if os.path.exists(outfile1):
+            log.info(' All features already extracted')
+            file = f'~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet'
+            features = pd.read_parquet(file)
             
-            arr=df_sub_all
-            obj_id=[re.match(r'(.*)\.jpg', f).group(1) for f in df_sub_all]
-        else:
-            print(' extraction all raw data')
+            if params.n_obj_max < features.shape[0]:
+                log.info(' Original dataset of features is too large - subsampling to {params.n_obj_max} obj_max')
+                f_all = features.sample(n=params.n_obj_max, random_state=0)
+                # NB: make it the same deterministic subsample across all replicates for replicability
+                del features
+            else:
+                f_all = features
+            
+            f_all = f_all.set_index('objid')
+            # f_all.shape
 
-        if params.features=='uvplib':
-            imagefilename=np.array(arr)
-            # init features list
-            features = list()
-            # init filepath
-            filepath = list()
-            for i, path in enumerate(imagefilename):
-                F =get_uvplib_features(image_dir+'/'+path, params, log)  
-                if len(F) > 0:  # test if feature extraction succeeded before appending to dataset
-                    features.append(F)
-                    filepath.append(path)
-            dataset = pd.DataFrame(features)
-            dataset['filename'] = filepath
-            dataset_features = pd.DataFrame(features, index=obj_id)
-            dataset_features = dataset_features.rename(columns=str) # parquet need strings as column names
+            log.info('	write them to disk')
+            os.makedirs(os.path.dirname(outfile), exist_ok=True)
+            with open(outfile, 'wb') as f:
+                pkl.dump(f_all, f)
         
-            log.info('	write them to disk')
-            dataset_features.to_parquet('~/datasets/morphopart/features/'+params.instrument+'/features_'+params.features+'.parquet')
+        else :
+            log.info(' extract features')
+            # image directory
+            image_dir='/home/jiho/datasets/morphopart/'+params.instrument+'/orig_imgs/'
+            arr = os.listdir(image_dir);
+            # image format
+            if params.instrument=="uvp6":
+                img_format = 'png'
+            else:
+                img_format='jpg'
+            obj_id=[re.match(r'(.*)\.'+img_format, f).group(1) for f in arr]
+        
+            # Sub-sample raw data if the original dataset is too large
+            if params.n_obj_max < len(obj_id):
+                # Sub-sample
+                df_sub_all=pd.DataFrame(arr)
+                df_sub_all=df_sub_all.sample(n=params.n_obj_max, random_state=0)
+                df_sub_all = df_sub_all[0].values.tolist()
+            
+                arr=df_sub_all
+                obj_id=[re.match(r'(.*)\.'+img_format, f).group(1) for f in df_sub_all]
+            else:
+                print(' extraction all raw data')
+        
+            # Extraction features following feature extractors
+            if params.features=='uvplib':
+                imagefilename=np.array(arr)
+                # init features list
+                features = list()
+                # init filepath
+                filepath = list()
+                for i, path in enumerate(imagefilename):
+                    F =get_uvplib_features(image_dir+'/'+path, params, log)  
+                    if len(F) > 0:  # test if feature extraction succeeded before appending to dataset
+                        features.append(F)
+                        filepath.append(path)
+                dataset = pd.DataFrame(features)
+                dataset['filename'] = filepath
+                f_all = pd.DataFrame(features, index=obj_id)
+                f_all = f_all.rename(columns=str) # parquet need strings as column names
+        
+                log.info('	write them to disk')
+                os.makedirs(os.path.dirname(outfile), exist_ok=True)
+                with open(outfile, 'wb') as f:
+                    pkl.dump(f_all, f)
                         
-        elif params.features=='mobilenet':
-            #TODO Should we also limit the mobilenet extraction ?
-            os.makedirs('features/'+params.instrument, exist_ok=True)
-            ##
-            dataset_features=get_mobilenet_features(directory, params, log)
-            log.info('	write them to disk')
-            dataset_features.to_parquet('~/datasets/morphopart/features/'+params.instrument+'/features_'+params.features+'.parquet')
+            elif params.features=='mobilenet':
+                f_all=get_mobilenet_features(directory, params, obj_id, log)
+                log.info('	write them to disk')
+                os.makedirs(os.path.dirname(outfile), exist_ok=True)
+                with open(outfile, 'wb') as f:
+                    pkl.dump(f_all, f)
+            else:
+                print("unknown features extraction")
             
-        else:
-            print("unknown features extraction")
-            
-    return(dataset_features)
+    return(f_all)
 
 def read_features(params, log):
     """Read features from a parquet file on disk
@@ -106,7 +139,7 @@ def read_features(params, log):
     """
 
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out/features_all__{params.instrument}_{params.features}_{params.n_obj_max}.pickle'
+        f'~/datasets/morphopart/out_yeo/features_all__{params.instrument}_{params.features}_{params.n_obj_max}.pickle'
     )
 
     if os.path.exists(outfile):
@@ -154,7 +187,7 @@ def subsample_features(f_all, params, log):
         ndarray: an array of shape nb of subsampled objects x nb of features containing the features.
     """
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out/features_subset__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}.pickle'
+        f'~/datasets/morphopart/out_yeo/features_subset__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}.pickle'
     )
 
     if os.path.exists(outfile):
@@ -199,7 +232,7 @@ def reduce_dimension(f_sub, params, log):
             - features_reduced (ndarray): array of shape nb of objects in f_sub x nb of components retained
     """
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out/dimred__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}.pickle'
+        f'~/datasets/morphopart/out_yeo/dimred__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}.pickle'
     )
 
     if os.path.exists(outfile):
@@ -210,10 +243,16 @@ def reduce_dimension(f_sub, params, log):
     else:
 
         log.info('	scale data')
-        from sklearn.preprocessing import StandardScaler
+        from sklearn.preprocessing import PowerTransformer, StandardScaler
+        
+        #1 Apply Yeo-Johnson transformation
+        pt = PowerTransformer(method='yeo-johnson')
+        f_yeo = pt.fit_transform(f_sub)
+        
+        #2 Standardize the data
         scaler = StandardScaler()
-        scaler.fit(f_sub)
-        f_sub_scaled = scaler.transform(f_sub)
+        scaler.fit(f_yeo)
+        f_sub_scaled = scaler.transform(f_yeo)
         # f_sub_scaled.shape
 
         log.info('	impute missing values')
@@ -287,7 +326,7 @@ def cluster(f_sub_reduced, params, log):
             - centroids (ndarray): array of shape n_clusters_tot x nb of ccolumsn in f_sub_reduced, the coordinates of the cluster centroids in the reduced space.
     """
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out/clust__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}.pickle'
+        f'~/datasets/morphopart/out_yeo/clust__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}.pickle'
     )
 
     if os.path.exists(outfile):
@@ -338,7 +377,7 @@ def hierarchize(centroids, params, log):
     """
 
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out/tree__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}.pickle'
+        f'~/datasets/morphopart/out_yeo/tree__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}.pickle'
     )
 
     if os.path.exists(outfile):
@@ -357,7 +396,7 @@ def hierarchize(centroids, params, log):
 
         tree = np.zeros([n,n]).astype(int)
         for i in range(0,n):
-            hclust = AgglomerativeClustering(n_clusters=i+1, linkage='ward')
+            hclust = AgglomerativeClustering(n_clusters=i+1, linkage=params.linkage)
             clusters = hclust.fit_predict(centroids)
             tree[:,i] = clusters
         tree = pd.DataFrame(tree)
@@ -384,7 +423,7 @@ def transform_features(f_all, dimred, params, log):
     """
 
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out/features_all_reduced__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}.pickle'
+        f'~/datasets/morphopart/out_yeo/features_all_reduced__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}.pickle'
     )
 
     if os.path.exists(outfile):
@@ -399,8 +438,14 @@ def transform_features(f_all, dimred, params, log):
             f_all_reduced = dimred['features_reduced']
         else:
             log.info('	reduce all features based on current subsample')
+            
+            from sklearn.preprocessing import PowerTransformer, StandardScaler
+        
+            #1 Apply Yeo-Johnson transformation
+            pt = PowerTransformer(method='yeo-johnson')
+            f_yeo = pt.fit_transform(f_all)
 
-            f_all_scaled = dimred['scaler'].transform(f_all)
+            f_all_scaled = dimred['scaler'].transform(f_yeo)
             f_all_scaled = np.nan_to_num(f_all_scaled, copy=False)
 
             # split in chunks to apply the transformation (avoid memory errors on the GPU)
@@ -540,7 +585,7 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
         results (DataFrame): containing the quality metrics
     """
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
+        f'~/datasets/morphopart/out_yeo/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
     )
     if os.path.exists(outfile):
          log.info('    load evaluation results')
@@ -552,11 +597,7 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
         log.info('	predict cluster number of all objects in the reduced features space')
         # make a DataFrame with cluster level as column index
         # NB: internally, this is likely using a nearest neighbour classifier
-        df = pd.read_csv( '~/datasets/morphopart/'+params.instrument+'/taxa.csv.gz', usecols = ['objid','taxon'])
-        if params.features=='uvplib':
-            f_all=f_all.set_index(f_all["objid"])
-        else:
-            print("index f_all done")
+        df = pd.read_csv( f'~/datasets/morphopart/{params.instrument}/taxa.csv.gz', usecols = ['objid','taxon'])
         df= df[np.isin(df["objid"].values, f_all.index.values)]
         df=df.set_index(df["objid"])
         df=df.reindex(f_all.index)    
@@ -568,7 +609,9 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
             # reduce to the number of clusters requested for evaluation
             # = merge the level of the tree with the correct number of clusters
             log.info('	reduce to the target number of clusters')
-            c_all = fast_merge(c_all, tree[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot)
+            #c_all = fast_merge(c_all, tree[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot)
+            c_all[params.n_clusters_eval]= tree.iloc[:,params.n_clusters_eval-1].iloc[c_all[200]].values
+            
 
         # compute metrics
         log.info('	compute ARI score')
@@ -577,11 +620,13 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
         c_all_ref = pd.DataFrame({params.n_clusters_tot: clusters_ref})
         # NB: if we are evaluating at n_clusters_tot, we do not need to add a column
         if params.n_clusters_eval != params.n_clusters_tot:
-            c_all_ref = fast_merge(c_all_ref, tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot)
+            #c_all_ref = fast_merge(c_all_ref, tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot)
+            c_all_ref[params.n_clusters_eval]= tree_ref.iloc[:,params.n_clusters_eval-1].iloc[c_all_ref[200]].values
 
         from sklearn.metrics.cluster import adjusted_rand_score # = ARI score
         score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)
-
+        
+        del c_all_ref, tree_ref
         # from cuml.metrics.cluster.adjusted_rand_index import adjusted_rand_score
         # score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)
         # NB: returns negative values sometimes!
@@ -608,7 +653,7 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
         #
         # import hdbscan
         # # or https://github.com/FelSiq/DBCV but it is slower
-        # DBCVs = [hdbscan.validity.validity_index(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx], metric='euclidean') for idx in eval_subsamples]
+        #DBCVs = [hdbscan.validity.validity_index(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx], metric='euclidean') for idx in eval_subsamples]
 
         log.info('	compute Silhouette score')
         # import ipdb; ipdb.set_trace()
@@ -645,7 +690,7 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
                 # record the actual number in the subsample used for the evaluation
                 # (there can be fewer than params.n_obj_eval if there are small clusters)
                 'n_obj_eval_actual': len(eval_subsamples[0]),
-                # 'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
+                 #'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
                 'SIL': np.mean([~np.isnan(SILs)]), 'sdSIL': np.std([~np.isnan(SILs)]), 'nanSIL': sum(np.isnan(SILs)),
                 'DIST': np.mean(DISTs), 'sdDIST': np.std(DISTs)
             }
@@ -655,7 +700,7 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
                 # record the actual number in the subsample used for the evaluation
                 # (there can be fewer than params.n_obj_eval if there are small clusters)
                 'n_obj_eval_actual': len(eval_subsamples[0]),
-                # 'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
+                 #'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
                 'SIL': np.mean(SILs), 'sdSIL': np.std(SILs), 'nanSIL': sum(np.isnan(SILs)),
                 'DIST': np.mean(DISTs), 'sdDIST': np.std(DISTs)
             }
@@ -1173,7 +1218,7 @@ def mobilenet_feature_extractor(directory, params, log):
     # save feature extractor (just in case)
     my_fe.save('cnn_mobilenet_v2_035_128_5_384/'+params.instrument+'/feature_extractor')
                                                                     
-def get_mobilenet_features(directory, params, log):
+def get_mobilenet_features(directory, params, obj_id, log):
     import tensorflow as tf
     from deep import progress # custom functions to track progress of training/prediction
     from deep import dataset            # custom data generator
@@ -1215,15 +1260,11 @@ def get_mobilenet_features(directory, params, log):
     input_shape = tuple(x for x in input_shape if x is not None)
 
     # TODO swap the comments in the next two lines for tests
-    df = pd.read_csv(data_dir + '/taxa.csv.gz', usecols = ['objid','taxon'], nrows=10000)
-    #df = pd.read_csv(data_dir + '/taxa.csv.gz', usecols = ['objid','taxon'])
-    df = df.rename(columns={'taxon': 'label'})
-    # compute path to images
-    df['img_path'] = [data_dir + '/orig_imgs/' + str(objid) + '.' + img_format for objid in df['objid']]
+    img_path = [data_dir + '/orig_imgs/' + str(objid) + '.' + img_format for objid in obj_id]
     print('  found ' + str(df.shape[0]) + ' objects')
 
     batches = dataset.EcoTaxaGenerator(
-        images_paths=df['img_path'].values,
+        images_paths=img_path,
         input_shape=input_shape,
         # NB: although the labels are in the file, we don't use them here
         labels=None, classes=None,
@@ -1233,7 +1274,7 @@ def get_mobilenet_features(directory, params, log):
     # extract features by going through the batches
     features = my_fe.predict(batches, callbacks=[progress.TQDMPredictCallback()],
                                   max_queue_size=max(10, workers*2), workers=workers)
-    dataset_features = pd.DataFrame(features, index=df['objid'])
-    dataset_features = dataset_features.rename(columns=str) # parquet need strings as column names
+    f_all = pd.DataFrame(features, index=obj_id)
+    f_all = f_all.rename(columns=str) # parquet need strings as column names
     
-    return(dataset_features)
+    return(f_all)

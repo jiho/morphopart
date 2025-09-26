@@ -12,14 +12,13 @@ import numpy as np
 import pandas as pd
 
 #from morphopart import *        # local package
-
 # import ipdb                     # debugging
 
 
 ## Prepare output ----
 
 # create output directory
-os.makedirs(os.path.expanduser('~/datasets/morphopart/out'), exist_ok=True)
+os.makedirs(os.path.expanduser('~/datasets/morphopart/out_yeo'), exist_ok=True)
 
 # log to a file and to the console
 log_format = logging.Formatter('%(asctime)s	%(message)s')
@@ -47,7 +46,7 @@ directory= '~/datasets/morphopart'
 # one row is one set of parameters for which there will be performance metrics
 
 # read parameters
-#params_grid = pd.read_csv('params_grid.csv')
+params_grid = pd.read_csv('params_grid.csv')
 # we will go through each row, within a loop
 
 # initialise a Series which will hold the values of the previous execution loop
@@ -62,12 +61,12 @@ for i in range(params_grid.shape[0]):
     log.info(f'start	Start parameters set {i} : {params.to_dict()}')
 
     # skip the computation if the result is already computed
-    #results_file = os.path.expanduser(
-    #    f'~/datasets/morphopart/out/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
-    #)
-    #if os.path.exists(results_file):
-    #    log.info('	skip: everything done') # ----
-    #    continue
+    results_file = os.path.expanduser(
+        f'~/datasets/morphopart/out_yeo/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
+    )
+    if os.path.exists(results_file):
+        log.info('	skip: everything done') # ----
+        continue
     
     log.info('step 0	Extract, read and prepare data') # ----
 
@@ -115,7 +114,6 @@ for i in range(params_grid.shape[0]):
     # plt.scatter(clust['centroids'][:,0], clust['centroids'][:,1], s=2, c='red')
 
 
-
     log.info('step 3	Hierarchize clusters') # ----
 
     step_params = step_params + ['linkage']
@@ -136,7 +134,7 @@ for i in range(params_grid.shape[0]):
     else:
         log.info('	load reference dimensionality reduction')
         dimred_ref_file = os.path.expanduser(
-            '~/datasets/morphopart/out/dimred__'
+            '~/datasets/morphopart/out_yeo/dimred__'
             f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}'
             '.pickle'
         )
@@ -149,7 +147,7 @@ for i in range(params_grid.shape[0]):
     else:
         log.info('	load reference clustering')
         cluster_ref_file = os.path.expanduser(
-            '~/datasets/morphopart/out/clust__'
+            '~/datasets/morphopart/out_yeo/clust__'
             f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}'
             '.pickle'
         )
@@ -162,7 +160,7 @@ for i in range(params_grid.shape[0]):
     else:
         log.info('	load reference cluster tree')
         tree_ref_file = os.path.expanduser(
-            '~/datasets/morphopart/out/tree__'
+            '~/datasets/morphopart/out_yeo/tree__'
             f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}'
             '.pickle'
         )
@@ -180,19 +178,3 @@ for i in range(params_grid.shape[0]):
     previous_params = params
 
     log.info('end	End')
-
-            
-parent_path = os.listdir("/home/sramondenc/datasets/morphopart/out/")
-results = pd.DataFrame([])
-for file in parent_path:
-  if file.startswith("eval"):
-    f='/home/sramondenc/datasets/morphopart/out/'+file
-    results = pd.concat([results, pd.read_csv(f)])
-    print(results)
-results=results.reset_index(drop=True)
-
-test=results[(results["features"]=="mobilenet") & (results["n_clusters_eval"]==5)].reset_index(drop=True)
-import seaborn as sns
-plt.figure()
-sns.boxplot(data=test, x="n_obj_sub", y="ARI", hue="dim_reducer")
-plt.show()
