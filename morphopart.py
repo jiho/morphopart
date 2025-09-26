@@ -67,8 +67,8 @@ def get_features(directory, params, log):
         else :
             log.info(' extract features')
             # image directory
-            #image_dir='/home/jiho/datasets/morphopart/all/'+params.instrument+'/orig_imgs/'
-            image_dir='/home/jiho/datasets/morphopart/all/UVP5SD/'
+            image_dir='/home/jiho/datasets/morphopart/'+params.instrument+'/orig_imgs/'
+            #image_dir='/home/jiho/datasets/morphopart/all/UVP5SD/'
             arr = os.listdir(image_dir);
             # image format
             if params.instrument=="uvp6":
@@ -1262,7 +1262,7 @@ def get_mobilenet_features(directory, params, obj_id, log):
 
     # TODO swap the comments in the next two lines for tests
     img_path = [data_dir + '/orig_imgs/' + str(objid) + '.' + img_format for objid in obj_id]
-    print('  found ' + str(df.shape[0]) + ' objects')
+    #print('  found ' + str(df.shape[0]) + ' objects')
 
     batches = dataset.EcoTaxaGenerator(
         images_paths=img_path,
