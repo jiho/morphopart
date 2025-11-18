@@ -42,7 +42,7 @@ params_grid = expand_grid({
     'n_obj_eval': [100000]
 })
 
-params_grid.loc[params_grid['clust_method'] != 'Kmean_hclust', ['linkage','n_clusters_eval']] = 'NaN'        # Disable irrelevant params for non-hclust methods
+params_grid.loc[params_grid['clust_method'] != 'Kmean_hclust', ['linkage']] = 'NaN'        # Disable irrelevant params for non-hclust methods
 params_grid = params_grid.drop_duplicates().reset_index(drop=True)                                           # Remove duplicates created by disabling parameters
 
 # Perform only one replicate in case n_obj_sub = n_obj_max.
