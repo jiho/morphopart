@@ -104,7 +104,7 @@ for i in range(params_grid.shape[0]):
 
     log.info('step 2	Cluster to define morphs') # ----
 
-    step_params = step_params + ['n_clusters_tot']
+    step_params = step_params + ['clust_method', 'n_clusters_tot']
     if all(params[step_params] == previous_params[step_params]):
         log.info('	skip: clusters already fitted')
     else:
@@ -141,14 +141,14 @@ for i in range(params_grid.shape[0]):
         with open(dimred_ref_file, 'rb') as f:
             dimred_ref = pkl.load(f)
 
-    ref_params = ref_params + ['n_clusters_tot']
+    ref_params = ref_params + ['clust_method', 'n_clusters_tot']
     if all(params[ref_params] == previous_params[ref_params]):
         log.info('	skip: reference clustering already loaded')
     else:
         log.info('	load reference clustering')
         cluster_ref_file = os.path.expanduser(
             '~/datasets/morphopart/out_yeo/clust__'
-            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}'
+            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}'
             '.pickle'
         )
         with open(cluster_ref_file, 'rb') as f:
@@ -161,7 +161,7 @@ for i in range(params_grid.shape[0]):
         log.info('	load reference cluster tree')
         tree_ref_file = os.path.expanduser(
             '~/datasets/morphopart/out_yeo/tree__'
-            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}'
+            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}_{params.linkage}'
             '.pickle'
         )
         with open(tree_ref_file, 'rb') as f:
@@ -171,7 +171,7 @@ for i in range(params_grid.shape[0]):
     if all(params[step_params] == previous_params[step_params]):
         log.info('	skip: evaluation already performed')
     else:
-        results = evaluate(f_all, f_all_reduced, clust, tree, dimred_ref['features_reduced'], cluster_ref['clusters'], tree_ref, params[step_params], log)
+        results = evaluate(f_all, f_all_reduced, clust, tree, dimred_ref['features_reduced'], cluster_ref, tree_ref, params[step_params], log)
  
 
     # set params for next turn of the loop

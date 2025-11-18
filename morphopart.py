@@ -315,7 +315,7 @@ def cluster(f_sub_reduced, params, log):
     """
     # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out_yeo/clust__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}.pickle'
+        f'~/datasets/morphopart/out_yeo/clust__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}.pickle'
     )
 
     if os.path.exists(outfile):                                             # Check if the file already exists
@@ -324,29 +324,80 @@ def cluster(f_sub_reduced, params, log):
             output = pkl.load(f)                                            # Load clusterer, centroïds & clusters
 
     else :
-        log.info('	define clusterer')
-        import cuml                                                         # Import RAPIDS cuML for GPU-accelerated Kmean
-        clust = cuml.KMeans(n_clusters=params.n_clusters_tot,               # Initialize UMAP with a setting the total number of clusters
-                       init='scalable-k-means++', n_init=10,                # Use scalable KMeans++ initialization and the algorithm will be run 10 times with different centroid seeds
-                       random_state=params.replicate)                       # Ensure reproducible clustering for each replicate
+        all_outputs = {}
+        if params.clust_method=='Kmean_seq':
+            
+            log.info('	Clusterer instantiated via the sequential K-means approach')
+            import cuml                                                         # Import RAPIDS cuML for GPU-accelerated Kmean
+            for n_clusters in range(2, params.n_clusters_tot + 1):                  # Loop over cluster numbers from 1 to n_clusters_tot
+                clust = cuml.KMeans(n_clusters=n_clusters,                          # Initialize Kmean with a setting the total number of clusters
+                               init='scalable-k-means++', n_init=10,                # Use scalable KMeans++ initialization and the algorithm will be run 10 times with different centroid seeds
+                               random_state=params.replicate)                       # Ensure reproducible clustering for each replicate
 
-        clust.fit(f_sub_reduced)                                            # Fit clustering to the reduced data
+                clust.fit(f_sub_reduced)                                            # Fit clustering to the reduced data
 
-        log.info('	define cluster centroids')                              # Log that cluster centroids are being extracted
-        centroids = clust.cluster_centers_                                  # Retrieve the coordinates of the cluster centroids from the fitted KMeans model
+                #log.info('	define cluster centroids')                              # Log that cluster centroids are being extracted
+                centroids = clust.cluster_centers_                                  # Retrieve the coordinates of the cluster centroids from the fitted KMeans model
 
-        log.info('	compute cluster membership')                            # Log that cluster assignments for each data point will be computed
-        clusters = clust.predict(f_sub_reduced)                             # Predict the cluster label for each reduced feature vector
+                #log.info('	compute cluster membership')                            # Log that cluster assignments for each data point will be computed
+                clusters = clust.predict(f_sub_reduced)                             # Predict the cluster label for each reduced feature vector
+                
+                print(n_clusters)
+                all_outputs[n_clusters] = {'clusterer': clust, 'centroids': centroids, 'clusters': clusters} # Store all outpouts
+                    
+        elif params.clust_method=='Kmean_hclust':
+            
+            log.info('	Clusterer instantiated via the K_mean + hierarchical approach')
+            import cuml                                                         # Import RAPIDS cuML for GPU-accelerated Kmean
+            clust = cuml.KMeans(n_clusters=params.n_clusters_tot,               # Initialize Kmean with a setting the total number of clusters
+                           init='scalable-k-means++', n_init=10,                # Use scalable KMeans++ initialization and the algorithm will be run 10 times with different centroid seeds
+                           random_state=params.replicate)                       # Ensure reproducible clustering for each replicate
 
-        log.info('	write to disk')                                         # Log that the clustering results will be saved to disk
-        output = {'clusterer': clust, 'centroids': centroids, 'clusters': clusters}
-        with open(outfile, 'wb') as f:
-            pkl.dump(output, f)                                             # Save the KMeans model, centroids, and cluster assignments to a pickle file
+            clust.fit(f_sub_reduced)                                            # Fit clustering to the reduced data
 
-        rmm.reinitialize()                                                  # Clean GPU memory (RAPIDS memory manager) to free resources
+            #log.info('	define cluster centroids')                              # Log that cluster centroids are being extracted
+            centroids = clust.cluster_centers_                                  # Retrieve the coordinates of the cluster centroids from the fitted KMeans model
+
+            #log.info('	compute cluster membership')                            # Log that cluster assignments for each data point will be computed
+            clusters = clust.predict(f_sub_reduced)                             # Predict the cluster label for each reduced feature vector
+            
+            all_outputs = {'clusterer': clust, 'centroids': centroids, 'clusters': clusters} # Store all outpouts
+        
+        elif params.clust_method=='Kmean_bisecting':
+            
+            log.info('	Clusterer instantiated via the the bissecting k-means approach')
+            from sklearn.cluster import BisectingKMeans
+            for n_clusters in range(2, params.n_clusters_tot + 1):
+                # Initialize the BisectingKMeans clusterer
+                clust = BisectingKMeans(
+                    n_clusters=n_clusters,       # Current number of clusters
+                    n_init=10,                   # Number of centroid seeds
+                    random_state=params.replicate
+                )
+    
+                # Fit clustering on the reduced data
+                clust.fit(dimred['features_reduced'])
+    
+                #log.info('    Extracting cluster centroids')
+                centroids = clust.cluster_centers_      # Cluster centroids
+    
+                #log.info('    Computing cluster membership')
+                clusters = clust.predict(dimred['features_reduced'])  # Cluster labels
+                
+                print(n_clusters)
+                all_outputs[n_clusters] = {'n_clusters': n_clusters, 'clusterer': clust, 'centroids': centroids, 'clusters': clusters} # Store all outpouts
+                                                        
+        else :
+            print ("algo not included")
+        
+        # Save results to a file with the number of clusters in the filename
+        #with open(outfile, 'wb') as f:
+        #    pkl.dump(all_outputs, f)                                             # Save the KMeans model, centroids, and cluster assignments to a pickle file
+            
+        rmm.reinitialize()                                                       # Clean GPU memory (RAPIDS memory manager) to free resources
     return(output)
 
-def hierarchize(centroids, params, log):
+def hierarchize(clust, params, log):
     """Build a hierachical tree of centroids
 
     Use AgglomerativeClustering to build a hiearchical tree of centroids and compute the cluster values at all cutting levels.
@@ -362,7 +413,7 @@ def hierarchize(centroids, params, log):
     """
     # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out_yeo/tree__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}.pickle'
+        f'~/datasets/morphopart/out_yeo/tree__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}_{params.linkage}.pickle'
     )
 
     if os.path.exists(outfile):                                 # Check if the file already exists
@@ -371,22 +422,26 @@ def hierarchize(centroids, params, log):
             tree = pkl.load(f)                                  # Load hierarchical classification 
 
     else :
-        log.info('	define tree of centroids')                  # Log that the hierarchical tree of centroids is being computed
+        if params.clust_method=='Kmean_hclust':
+            log.info('	define tree of centroids')                  # Log that the hierarchical tree of centroids is being computed
 
-        from sklearn.cluster import AgglomerativeClustering
-
-        n = centroids.shape[0]                                  # Number of centroids from the previous KMeans clustering. NB: should be params.n_clusters_tot, but we may as well drop this dependency
-        tree = np.zeros([n,n]).astype(int)                      # Initialize an empty array to store hierarchical cluster labels for each centroid
-        for i in range(0,n):                                    # Build a hierarchical clustering tree by iteratively clustering centroids
-            hclust = AgglomerativeClustering(n_clusters=i+1, linkage=params.linkage)        # Perform agglomerative clustering with i+1 clusters
-            clusters = hclust.fit_predict(centroids)            # Assign each centroid to a cluster
-            tree[:,i] = clusters                                # Store cluster labels for a number of clusters
-        tree = pd.DataFrame(tree)                               # Convert the tree to a pandas DataFrame for easier handling
-        tree.columns = np.arange(1,n+1)                         # Columns correspond to the number of clusters
-
-        log.info('	write to disk')                             # Log that the hierarchical tree will be saved
-        with open(outfile, 'wb') as f:
-            pkl.dump(tree, f)                                   # Save the hierarchical tree to a pickle file
+            from sklearn.cluster import AgglomerativeClustering
+            centroids=clust['centroids']
+            n = centroids.shape[0]                                  # Number of centroids from the previous KMeans clustering. NB: should be params.n_clusters_tot, but we may as well drop this dependency
+            tree = np.zeros([n,n]).astype(int)                      # Initialize an empty array to store hierarchical cluster labels for each centroid
+            for i in range(0,n):                                    # Build a hierarchical clustering tree by iteratively clustering centroids
+                hclust = AgglomerativeClustering(n_clusters=i+1, linkage=params.linkage)        # Perform agglomerative clustering with i+1 clusters
+                clusters = hclust.fit_predict(centroids)            # Assign each centroid to a cluster
+                tree[:,i] = clusters                                # Store cluster labels for a number of clusters
+            tree = pd.DataFrame(tree)                               # Convert the tree to a pandas DataFrame for easier handling
+            tree.columns = np.arange(1,n+1)                         # Columns correspond to the number of clusters
+            
+            #log.info('	write to disk')                             # Log that the hierarchical tree will be saved
+            #with open(outfile, 'wb') as f:
+            #    pkl.dump(tree, f)                                   # Save the hierarchical tree to a pickle file
+        else :
+            print (f"Clustering method {params.clust_method} selected. Hierarchical classification is skipped for this method.")
+            return None
 
     return(tree)
 
@@ -457,7 +512,7 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
     """
     # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out_yeo/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
+        f'~/datasets/morphopart/out_yeo/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
     )
     if os.path.exists(outfile):                                                                     # Check if the file already exists
          log.info('    load evaluation results')                                                    # Log that the evaluation has already been done
@@ -473,36 +528,46 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
         df=df.set_index(df["objid"])                                                                             # Set 'objid' as the index to align with f_all
         df=df.reindex(f_all.index)                                                                               # Reindex to ensure the same order as f_all for consistent alignment    
         
-        c_all = pd.DataFrame({params.n_clusters_tot: clust['clusterer'].predict(f_all_reduced)})                 # Predict cluster assignments for all reduced feature vectors
-        c_all["taxon"]=df["taxon"].values                                                                        # Add the corresponding taxon labels to the cluster assignment DataFrame
-
-        if params.n_clusters_eval != params.n_clusters_tot:                                                      # If the evaluation cluster count differs from the total (applies to KMeans–hierarchical approach)
-            # Reduce the clustering to the desired number of clusters for evaluation (i.e., merge the hierarchical clustering tree to reach the specified level)
-            log.info('	reduce to the target number of clusters')
+        if params.clust_method == 'Kmean_hclust':
+            c_all = pd.DataFrame({params.n_clusters_tot: clust['clusterer'].predict(f_all_reduced)})                 # Predict cluster assignments for all reduced feature vectors
+            c_all["taxon"]=df["taxon"].values                                                                        # Add the corresponding taxon labels to the cluster assignment DataFrame
             
-            # Map each object’s total-cluster assignment to its corresponding evaluated-cluster label using the hierarchical tree structure
-            #c_all = fast_merge(c_all, tree[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot) # Note: commented out because using fast_merge here reorders clusters by their labels, not by the original object IDs. This breaks the correspondence with the original data order.
-            c_all = c_all.merge(tree[[params.n_clusters_tot, params.n_clusters_eval]], left_on=params.n_clusters_tot, right_on=params.n_clusters_tot, how="left") #TODO to be check by JO
+            if params.n_clusters_eval != params.n_clusters_tot:                                                      # If the evaluation cluster count differs from the total (applies to KMeans–hierarchical approach)
+                # Reduce the clustering to the desired number of clusters for evaluation (i.e., merge the hierarchical clustering tree to reach the specified level)
+                log.info('	reduce to the target number of clusters')
             
-        log.info('	compute metrics score')                                                             # Log that metrics (e.g. Adjusted Rand Index, SIL, DIST, DBCV) computation is starting
-        c_all_ref = pd.DataFrame({params.n_clusters_tot: clusters_ref})                                 # Define the reference cluster assignments at the total cluster level
+                # Map each object’s total-cluster assignment to its corresponding evaluated-cluster label using the hierarchical tree structure
+                #c_all = fast_merge(c_all, tree[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot) # Note: commented out because using fast_merge here reorders clusters by their labels, not by the original object IDs. This breaks the correspondence with the original data order.
+                c_all = c_all.merge(tree[[params.n_clusters_tot, params.n_clusters_eval]], left_on=params.n_clusters_tot, right_on=params.n_clusters_tot, how="left")
+            
+            log.info('	compute metrics score')                                                             # Log that metrics (e.g. Adjusted Rand Index, SIL, DIST, DBCV) computation is starting
+            c_all_ref = pd.DataFrame({params.n_clusters_tot: clusters_ref['clusters']})                                 # Define the reference cluster assignments at the total cluster level
 
-        if params.n_clusters_eval != params.n_clusters_tot:                                             # If evaluating at a different cluster level, map the reference clusters to the desired number of clusters using the hierarchical tree
+            if params.n_clusters_eval != params.n_clusters_tot:                                             # If evaluating at a different cluster level, map the reference clusters to the desired number of clusters using the hierarchical tree
             #c_all_ref = fast_merge(c_all_ref, tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot) # Note: commented out because using fast_merge here reorders clusters by their labels, not by the original object IDs. This breaks the correspondence with the original data order.
-            c_all_ref = c_all_ref.merge(tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], left_on=params.n_clusters_tot, right_on=params.n_clusters_tot, how="left") #TODO to be check by JO
-
+            c_all_ref = c_all_ref.merge(tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], left_on=params.n_clusters_tot, right_on=params.n_clusters_tot, how="left")
+        
+            del c_all_ref, tree_ref                                                                                              # Clean up temporary DataFrames to free memory
+            
+        
+        elif params.clust_method == 'Kmean_seq' or params.clust_method == 'Kmean_bisecting':
+            c_all = pd.DataFrame({params.n_clusters_eval: clust[n_clusters_eval]['clusterer'].predict(f_all_reduced)})                 # Predict cluster assignments for all reduced feature vectors
+            c_all["taxon"]=df["taxon"].values                                                                                         # Add the corresponding taxon labels to the cluster assignment DataFrame
+            
+            c_all_ref = pd.DataFrame({params.n_clusters_eval: clusters_ref[n_clusters_eval]['clusters']})                              # Define the reference cluster assignments at the total cluster level
+        else
+            print('Error all object in the reduced space cannot be predict')
+        
         # --------------------------------------------------------------------
         # Compute ARI (Adjusted Rand Index)                                     # Range: -1 to 1 -> 1: Perfect agreement — the two clusterings are identical; 0: Random clustering — the agreement is what you’d expect by chance; Negative: Worse than random — clusters are anti-correlated with true labels.
         # --------------------------------------------------------------------
         log.info('	compute ARI score')                                                                                      # Log that Adjusted Rand Index computation is starting
         from sklearn.metrics.cluster import adjusted_rand_score                                                             # Import the ARI metric from scikit-learn --> CPU
         score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)     # Compute the Adjusted Rand Index between reference and predicted clusters
-        
+    
         # NOTE: The cuML ARI function is commented out here because on large datasets, it can produce incorrect or extremely large/small ARI values due to GPU float32 precision and overflow issues. Sometimes ARI_score reached -495 ...
         #from cuml.metrics.cluster.adjusted_rand_index import adjusted_rand_score                                             # Import the GPU-accelerated Adjusted Rand Index (ARI) function from cuML
         #score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)      # Compute the ARI score between reference and predicted clusters. Note: ARI can occasionally return negative values if the clustering is worse than random
-        
-        del c_all_ref, tree_ref                                                                                              # Clean up temporary DataFrames to free memory
         
         # --------------------------------------------------------------------
         # Subsample the data for DBCV and Silhouette score computation
