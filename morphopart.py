@@ -5,6 +5,8 @@
 # if it does, they read it and return the result; if not they produce it.
 #
 
+# TODO add DINO feature extraction and sub sample before feature extraction
+
 import os
 import pickle as pkl
 import numpy as np
@@ -12,6 +14,8 @@ import pandas as pd
 import cuml
 import rmm
 import re
+
+#------------------------ Core pipeline function -------------------------------#
 
 def get_features(directory, params, log):
     """Extract features from original images
@@ -29,100 +33,99 @@ def get_features(directory, params, log):
     Returns:
         ndarray: an array of shape nb of objects x nb of features containing the features.
     """
-    # TODO add DINO feature extraction and sub sample before feature extraction
+    # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
         f'~/datasets/morphopart/out_yeo/features_all__{params.instrument}_{params.features}_{params.n_obj_max}.pickle'
     )
 
-    if os.path.exists(outfile):
-        log.info(' features already extracted')
-        log.info(' load features')
-        with open(outfile, 'rb') as f:
-            f_all = pkl.load(f)    
+    if os.path.exists(outfile):                                                         # Check if the file already exists
+        log.info(' features already extracted')                                         # Log that the features have already been extracted
+        log.info(' load features')                                                      # Log that we are loading the existing features
+        with open(outfile, 'rb') as f:                                                  # Open the pickle file in read-binary mode
+            f_all = pkl.load(f)                                                         # Load the features into 'f_all'
     else :
+        # Define the path to the parquet file for the features based on instrument and feature type
         outfile1 = os.path.expanduser(
             f'~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet'
         )
-        if os.path.exists(outfile1):
+        if os.path.exists(outfile1):                                                    # Check if the parquet file exists
             log.info(' All features already extracted')
             file = f'~/datasets/morphopart/{params.instrument}/features_{params.features}.parquet'
-            features = pd.read_parquet(file)
+            features = pd.read_parquet(file)                                            # Load the parquet file into a DataFrame
             
-            if params.n_obj_max < features.shape[0]:
+            if params.n_obj_max < features.shape[0]:                                    # If the dataset has more rows than n_obj_max, subsample to reduce size
                 log.info(' Original dataset of features is too large - subsampling to {params.n_obj_max} obj_max')
-                f_all = features.sample(n=params.n_obj_max, random_state=0)
-                # NB: make it the same deterministic subsample across all replicates for replicability
-                del features
+                f_all = features.sample(n=params.n_obj_max, random_state=0)             # Deterministic subsample for reproducibility
+                del features                                                            # Free memory
             else:
-                f_all = features
+                f_all = features                                                        # If dataset is already small enough, use it as is
             
-            f_all = f_all.set_index('objid')
-            # f_all.shape
+            f_all = f_all.set_index('objid')                                            # Set 'objid' as the index
+            f_all.shape
 
-            log.info('	write them to disk')
-            os.makedirs(os.path.dirname(outfile), exist_ok=True)
+            log.info('	write them to disk')                                            # Log that the processed features will be saved to disk
+            os.makedirs(os.path.dirname(outfile), exist_ok=True)                        # Ensure the output directory exists
             with open(outfile, 'wb') as f:
-                pkl.dump(f_all, f)
-        
+                pkl.dump(f_all, f)                                                      # Save the features DataFrame to a pickle file for faster future loading
         else :
-            log.info(' extract features')
-            # image directory
-            image_dir='/home/jiho/datasets/morphopart/'+params.instrument+'/orig_imgs/'
+            log.info(' extract features')                                               # Log that the extraction features will start
+            image_dir='/home/jiho/datasets/morphopart/'+params.instrument+'/orig_imgs/' # Directory containing the raw images
             #image_dir='/home/jiho/datasets/morphopart/all/UVP5SD/'
-            arr = os.listdir(image_dir);
-            # image format
+            
+            arr = os.listdir(image_dir);                                        # List all files in the image directory
+            # Determine the image file format based on the instrument
             if params.instrument=="uvp6":
                 img_format = 'png'
             else:
                 img_format='jpg'
-            obj_id=[re.match(r'(.*)\.'+img_format, f).group(1) for f in arr]
+            obj_id=[re.match(r'(.*)\.'+img_format, f).group(1) for f in arr]   # Extract the object IDs from the filenames by removing the file extension
         
             # Sub-sample raw data if the original dataset is too large
             if params.n_obj_max < len(obj_id):
                 # Sub-sample
-                df_sub_all=pd.DataFrame(arr)
-                df_sub_all=df_sub_all.sample(n=params.n_obj_max, random_state=0)
-                df_sub_all = df_sub_all[0].values.tolist()
+                df_sub_all=pd.DataFrame(arr)                                        # Convert the list of filenames to a DataFrame for easy sampling
+                df_sub_all=df_sub_all.sample(n=params.n_obj_max, random_state=0)    # Randomly sample n_obj_max filenames deterministically (for reproducibility)
+                df_sub_all = df_sub_all[0].values.tolist()                          # Convert the sampled DataFrame back to a list
             
-                arr=df_sub_all
-                obj_id=[re.match(r'(.*)\.'+img_format, f).group(1) for f in df_sub_all]
+                arr=df_sub_all                                                          # Update 'arr' to contain only the sampled filenames
+                obj_id=[re.match(r'(.*)\.'+img_format, f).group(1) for f in df_sub_all] # Update 'obj_id' to match the sampled filenames by stripping the file extensions
             else:
                 print(' extraction all raw data')
         
             # Extraction features following feature extractors
-            if params.features=='uvplib':
-                imagefilename=np.array(arr)
-                # init features list
-                features = list()
-                # init filepath
-                filepath = list()
-                for i, path in enumerate(imagefilename):
-                    F =get_uvplib_features(image_dir+'/'+path, params, log)  
-                    if len(F) > 0:  # test if feature extraction succeeded before appending to dataset
+            if params.features=='uvplib':                                       # If feature extractors is uvplib
+                imagefilename=np.array(arr)                                     # Convert the list of sampled filenames to a NumPy array for easier iteration
+                features = list()                                               # Initialize an empty list to store extracted features
+                filepath = list()                                               # Initialize an empty list to store corresponding file paths
+                for i, path in enumerate(imagefilename):                        # Loop over each image file            
+                    F =get_uvplib_features(image_dir+'/'+path, params, log)     # Extract features from the image using a custom function  
+                    if len(F) > 0:                                              # test if feature extraction succeeded before appending to dataset
                         features.append(F)
                         filepath.append(path)
-                dataset = pd.DataFrame(features)
+                dataset = pd.DataFrame(features)                                # Convert the list of features to a DataFrame
                 dataset['filename'] = filepath
-                f_all = pd.DataFrame(features, index=obj_id)
-                f_all = f_all.rename(columns=str) # parquet need strings as column names
+                f_all = pd.DataFrame(features, index=obj_id)                    # Add a column with the original filenames
+                f_all = f_all.rename(columns=str)                               # parquet need strings as column names
         
-                log.info('	write them to disk')
-                os.makedirs(os.path.dirname(outfile), exist_ok=True)
+                log.info('	write them to disk')                                # Log that the processed features will be saved to disk
+                os.makedirs(os.path.dirname(outfile), exist_ok=True)            # Ensure the output directory exists
                 with open(outfile, 'wb') as f:
-                    pkl.dump(f_all, f)
+                    pkl.dump(f_all, f)                                          # Save the features DataFrame to a pickle file for faster future loading
                         
-            elif params.features=='mobilenet':
-                f_all=get_mobilenet_features(directory, params, obj_id, log)
-                log.info('	write them to disk')
-                os.makedirs(os.path.dirname(outfile), exist_ok=True)
+            elif params.features=='mobilenet':                                  # if we want features from deep learning (here mobilenet)
+                f_all=get_mobilenet_features(directory, params, obj_id, log)    # Extract features from the image using a custom function
+                
+                log.info('	write them to disk')                                # Log that the processed features will be saved to disk
+                os.makedirs(os.path.dirname(outfile), exist_ok=True)            # Ensure the output directory exists
                 with open(outfile, 'wb') as f:
-                    pkl.dump(f_all, f)
+                    pkl.dump(f_all, f)                                          # Save the features DataFrame to a pickle file for faster future loading
             else:
-                print("unknown features extraction")
+                print("unknown features extraction")                            # Display a message when the feature extractor is missing or not available
             
-    return(f_all)
+    return(f_all)                                                   # Return the features
 
-def read_features(params, log):
+# The "read_features" function below may no longer be needed / is deprecated
+#def read_features(params, log):
     """Read features from a parquet file on disk
 
     Read all features. When there are many, subsample them to a manageable number.
@@ -171,7 +174,6 @@ def read_features(params, log):
 
     return(f_all)
 
-
 def subsample_features(f_all, params, log):
     """Subsample features for a smaller number of objects
 
@@ -187,33 +189,30 @@ def subsample_features(f_all, params, log):
     Returns:
         ndarray: an array of shape nb of subsampled objects x nb of features containing the features.
     """
+    # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
         f'~/datasets/morphopart/out_yeo/features_subset__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}.pickle'
     )
 
-    if os.path.exists(outfile):
-        log.info('	load subsample of features')
-        with open(outfile, 'rb') as f:
-            f_sub = pkl.load(f)
-
-    else :
-        if params.n_obj_sub < f_all.shape[0]:
-            log.info('	subsample features')
+    if os.path.exists(outfile):                     # Check if the file already exists
+        log.info('	load subsample of features')    # Log that the subsample of features have already been extracted
+        with open(outfile, 'rb') as f:              # Open the pickle file in read-binary mode
+            f_sub = pkl.load(f)                     # Load the features into 'f_sub'
+    else :                                          # If the file doesn't exists
+        if params.n_obj_sub < f_all.shape[0]:       # And if the number of objects in the subsample to use is smaller than the total number of features       
+            log.info('	subsample features')        # Log that the subsample of features will be perform
             # subsample rows
-            f_sub = f_all.sample(n=params.n_obj_sub, random_state=params.replicate)
-            # NB: the random state is defined for this to be reproducable
-            #     it depends on the replicate number (just to make sure it changes between replicates)
+            f_sub = f_all.sample(n=params.n_obj_sub, random_state=params.replicate) # NB: the random state is defined for this to be reproducable. It depends on the replicate                                                                      number (just to make sure it changes between replicates)
             f_sub.shape
         else:
-            log.info('	no need to subsample, copying all features')
-            f_sub = f_all
+            log.info('	no need to subsample, copying all features')                # Log that the subsample of features is already too small
+            f_sub = f_all                                                           # So the total number of features is similar to the subsample
 
-        log.info('	write them to disk')
+        log.info('	write them to disk')            # Log that the processed subsample features will be saved to disk
         with open(outfile, 'wb') as f:
-            pkl.dump(f_sub, f)
+            pkl.dump(f_sub, f)                      # Save the features DataFrame to a pickle file for faster future loading
 
     return(f_sub)
-
 
 def reduce_dimension(f_sub, params, log):
     """Reduce the dimension of features
@@ -232,49 +231,40 @@ def reduce_dimension(f_sub, params, log):
             - dim_reducer: the dimensional reduction method fitted to the data; also has a .transform() method for new data
             - features_reduced (ndarray): array of shape nb of objects in f_sub x nb of components retained
     """
+    # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
         f'~/datasets/morphopart/out_yeo/dimred__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}.pickle'
     )
 
-    if os.path.exists(outfile):
-        log.info('	load dimension reduction info')
+    if os.path.exists(outfile):                                                 # Check if the file already exists
+        log.info('	load dimension reduction info')                             # Log that the dimensionality reduction has already been done
         with open(outfile, 'rb') as f:
-            output = pkl.load(f)
-
+            output = pkl.load(f)                                                # Load subsampled, reduced features
     else:
-
-        log.info('	scale data')
-        from sklearn.preprocessing import PowerTransformer, StandardScaler
+        log.info('	scale data')                                                # Log that feature scaling on the subsampled dataset is starting
         
-        #1 Apply Yeo-Johnson transformation
-        pt = PowerTransformer(method='yeo-johnson')
-        f_yeo = pt.fit_transform(f_sub)
+        from sklearn.preprocessing import PowerTransformer, StandardScaler              
+        f_yeo = PowerTransformer(method='yeo-johnson').fit_transform(f_sub)     # Perform Yeo-Johnson transformation to normalize dataset (correct distribution)
         
-        #2 Standardize the data
-        scaler = StandardScaler()
-        scaler.fit(f_yeo)
-        f_sub_scaled = scaler.transform(f_yeo)
+        scaler = StandardScaler()                                               # Initialize a StandardScaler to standardize features
+        scaler.fit(f_yeo)                                                       # Fit the scaler to the Yeo-Johnson transformed data
+        f_sub_scaled = scaler.transform(f_yeo)                                  # Transform the data to have zero mean and unit variance 
         # f_sub_scaled.shape
 
-        log.info('	impute missing values')
-        # since we have scaled the data, we can simply replace missing values by 0
-        f_sub_scaled = np.nan_to_num(f_sub_scaled, copy=False)
+        log.info('	impute missing values')                                     # Log that missing values will be imputed
+        f_sub_scaled = np.nan_to_num(f_sub_scaled, copy=False)                  # since we have scaled the data, we can simply replace missing values by 0
 
-        log.info('	define dimensionality reducer')
-        if params.dim_reducer == 'PCA':
-            import cuml
-            # define the number of components:
-            #   set a maximum to 50
-            #   keep only those bringing more than 1% more explained variance
-            dim_reducer = cuml.PCA(n_components=50)
-            dim_reducer.fit(f_sub_scaled)
-            expl_var = dim_reducer.explained_variance_ratio_
-            n_components = np.min(np.where(expl_var < 0.01))
+        log.info('	define dimensionality reducer')                             # Log that dimensionality reduction is starting
+        if params.dim_reducer == 'PCA':                                         # If PCA is selected as the dimensionality reduction method
+            import cuml                                                         # Import RAPIDS cuML for GPU-accelerated PCA
+            dim_reducer = cuml.PCA(n_components=50)                             # Initialize PCA with a maximum of 50 components. Later we will keep only those bringing more than 1% more explained variance
+            dim_reducer.fit(f_sub_scaled)                                       # Fit PCA to the scaled data
+            expl_var = dim_reducer.explained_variance_ratio_                    # Get the proportion of variance explained by each component
+            n_components = np.min(np.where(expl_var < 0.01))                    # Determine the number of components that explain at least 1% variance each
+            
+            dim_reducer = cuml.PCA(n_components=n_components)                   # then define the dimensionality reduction based on this number of components
 
-            # then define the dimensionality reduction based on this number of components
-            dim_reducer = cuml.PCA(n_components=n_components)
-
-        elif params.dim_reducer == 'UMAP':
+        elif params.dim_reducer == 'UMAP':                                      # If UMAP is selected as the dimensionality reduction method
             # define n_neighbours as a Michalis-Menten type function from the number of points
             def umap_n_neighbours(x):
                 n_min = 10
@@ -282,33 +272,30 @@ def reduce_dimension(f_sub, params, log):
                 n = np.round(n_min + n_max*x / (500000+x))
                 return(n)
 
-            import cuml
-            dim_reducer = cuml.UMAP(
+            import cuml                                                         # Import RAPIDS cuML for GPU-accelerated PCA
+            dim_reducer = cuml.UMAP(                                            # Initialize UMAP with a maximum of 4 components and number neighbours as Michalis-Menten type function
                 n_neighbors=umap_n_neighbours(f_sub.shape[0]),
                 n_components=4
             )
 
-        else:
-            print('Unknown dimensionality reducer; crashing')
+        else:                                                                   # Dimensionality reduction method not implemented
+            print('Unknown dimensionality reducer; crashing')                   # Display a message when the dimensionality reducer is missing or not available
 
-        log.info('	fit dimensionality reducer')
+        log.info('	fit dimensionality reducer')                                # Log that the dimensionality reducer is being fitted                               
         dim_reducer.fit(f_sub_scaled)
 
-        log.info('	reduce dimension of features')
-        # split in chunks to apply the transformation (avoid memory errors on the GPU)
-        f_sub_scaled = np.vsplit(f_sub_scaled, 10)
-        f_sub_reduced = [dim_reducer.transform(chunk) for chunk in f_sub_scaled]
-        f_sub_reduced = np.vstack(f_sub_reduced)
+        log.info('	reduce dimension of features')                              # Log that the feature matrix will now be reduced in dimensionality
+        f_sub_scaled = np.vsplit(f_sub_scaled, 10)                              # Split in chunks to apply the transformation (avoid memory errors on the GPU)
+        f_sub_reduced = [dim_reducer.transform(chunk) for chunk in f_sub_scaled]# Apply the dimensionality reduction to each chunk
+        f_sub_reduced = np.vstack(f_sub_reduced)                                # Stack the reduced chunks back into a single array
 
-        log.info('	write to disk')
+        log.info('	write to disk')                                             # Log that the reduced features will be saved to disk
         output = {'scaler': scaler, 'dim_reducer': dim_reducer, 'features_reduced': f_sub_reduced}
         with open(outfile, 'wb') as f:
-            pkl.dump(output, f)
+            pkl.dump(output, f)                                                 # Save the scaler, dimensionality reducer, and reduced features to a pickle file
 
-        # clean CUDA memory
-        rmm.reinitialize()
+        rmm.reinitialize()                                                      # Clean GPU memory (RAPIDS memory manager) to free resources
     return(output)
-
 
 def cluster(f_sub_reduced, params, log):
     """Cluster features
@@ -326,41 +313,38 @@ def cluster(f_sub_reduced, params, log):
             - clusterer: the clustering function, fitted to the data; has a .transform() method for new data
             - centroids (ndarray): array of shape n_clusters_tot x nb of ccolumsn in f_sub_reduced, the coordinates of the cluster centroids in the reduced space.
     """
+    # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
         f'~/datasets/morphopart/out_yeo/clust__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}.pickle'
     )
 
-    if os.path.exists(outfile):
-        log.info('	load cluster info')
+    if os.path.exists(outfile):                                             # Check if the file already exists
+        log.info('	load cluster info')                                     # Log that the clustering approach has already been done
         with open(outfile, 'rb') as f:
-            output = pkl.load(f)
+            output = pkl.load(f)                                            # Load clusterer, centroïds & clusters
 
     else :
         log.info('	define clusterer')
+        import cuml                                                         # Import RAPIDS cuML for GPU-accelerated Kmean
+        clust = cuml.KMeans(n_clusters=params.n_clusters_tot,               # Initialize UMAP with a setting the total number of clusters
+                       init='scalable-k-means++', n_init=10,                # Use scalable KMeans++ initialization and the algorithm will be run 10 times with different centroid seeds
+                       random_state=params.replicate)                       # Ensure reproducible clustering for each replicate
 
-        import cuml
-        clust = cuml.KMeans(n_clusters=params.n_clusters_tot,
-                       init='scalable-k-means++', n_init=10,
-                       random_state=params.replicate
-                      )
+        clust.fit(f_sub_reduced)                                            # Fit clustering to the reduced data
 
-        clust.fit(f_sub_reduced)
+        log.info('	define cluster centroids')                              # Log that cluster centroids are being extracted
+        centroids = clust.cluster_centers_                                  # Retrieve the coordinates of the cluster centroids from the fitted KMeans model
 
-        log.info('	define cluster centroids')
-        centroids = clust.cluster_centers_
+        log.info('	compute cluster membership')                            # Log that cluster assignments for each data point will be computed
+        clusters = clust.predict(f_sub_reduced)                             # Predict the cluster label for each reduced feature vector
 
-        log.info('	compute cluster membership')
-        clusters = clust.predict(f_sub_reduced)
-
-        log.info('	write to disk')
+        log.info('	write to disk')                                         # Log that the clustering results will be saved to disk
         output = {'clusterer': clust, 'centroids': centroids, 'clusters': clusters}
         with open(outfile, 'wb') as f:
-            pkl.dump(output, f)
+            pkl.dump(output, f)                                             # Save the KMeans model, centroids, and cluster assignments to a pickle file
 
-        # clean CUDA memory
-        rmm.reinitialize()
+        rmm.reinitialize()                                                  # Clean GPU memory (RAPIDS memory manager) to free resources
     return(output)
-
 
 def hierarchize(centroids, params, log):
     """Build a hierachical tree of centroids
@@ -376,39 +360,35 @@ def hierarchize(centroids, params, log):
     Returns:
         tree (DataFrame): with as many rows and columns as there are initial clusters; columns are numbered from 1 and each gives the cluster membership for the corresponding number of clusters. This means column 1 contains 1 cluster, so all 0; column 2 contains 2 clusters, so either 0 or 1; column 3...; and the last column contains all different numbers corresponding to the maximum level of clusters.
     """
-
+    # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
         f'~/datasets/morphopart/out_yeo/tree__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}.pickle'
     )
 
-    if os.path.exists(outfile):
-        log.info('	load tree')
+    if os.path.exists(outfile):                                 # Check if the file already exists
+        log.info('	load tree')                                 # Log that the hierarchical classification approach has already been done
         with open(outfile, 'rb') as f:
-            tree = pkl.load(f)
+            tree = pkl.load(f)                                  # Load hierarchical classification 
 
     else :
-        log.info('	define tree of centroids')
+        log.info('	define tree of centroids')                  # Log that the hierarchical tree of centroids is being computed
 
         from sklearn.cluster import AgglomerativeClustering
 
-        # number of clusters
-        n = centroids.shape[0]
-        # NB: should be params.n_clusters_tot, but we may as well drop this dependency
+        n = centroids.shape[0]                                  # Number of centroids from the previous KMeans clustering. NB: should be params.n_clusters_tot, but we may as well drop this dependency
+        tree = np.zeros([n,n]).astype(int)                      # Initialize an empty array to store hierarchical cluster labels for each centroid
+        for i in range(0,n):                                    # Build a hierarchical clustering tree by iteratively clustering centroids
+            hclust = AgglomerativeClustering(n_clusters=i+1, linkage=params.linkage)        # Perform agglomerative clustering with i+1 clusters
+            clusters = hclust.fit_predict(centroids)            # Assign each centroid to a cluster
+            tree[:,i] = clusters                                # Store cluster labels for a number of clusters
+        tree = pd.DataFrame(tree)                               # Convert the tree to a pandas DataFrame for easier handling
+        tree.columns = np.arange(1,n+1)                         # Columns correspond to the number of clusters
 
-        tree = np.zeros([n,n]).astype(int)
-        for i in range(0,n):
-            hclust = AgglomerativeClustering(n_clusters=i+1, linkage=params.linkage)
-            clusters = hclust.fit_predict(centroids)
-            tree[:,i] = clusters
-        tree = pd.DataFrame(tree)
-        tree.columns = np.arange(1,n+1)
-
-        log.info('	write to disk')
+        log.info('	write to disk')                             # Log that the hierarchical tree will be saved
         with open(outfile, 'wb') as f:
-            pkl.dump(tree, f)
+            pkl.dump(tree, f)                                   # Save the hierarchical tree to a pickle file
 
     return(tree)
-
 
 def transform_features(f_all, dimred, params, log):
     """Transform all features in the reduced space
@@ -422,150 +402,40 @@ def transform_features(f_all, dimred, params, log):
     Returns:
         f_all_reduced (ndarray): features in f_all reduced through dimred['dim_reducer'].
     """
-
+    # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
         f'~/datasets/morphopart/out_yeo/features_all_reduced__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}.pickle'
     )
 
-    if os.path.exists(outfile):
-        log.info('	load full data predicted based on current subsample')
+    if os.path.exists(outfile):                                             # Check if the file already exists
+        log.info('	load full data predicted based on current subsample')   # Log that the dimensionality reduction has already been done on the full data based on the subsample
         with open(outfile, 'rb') as f:
-            f_all_reduced = pkl.load(f)
-
+            f_all_reduced = pkl.load(f)                                     # Load full data, reduced features based on the subsample
     else :
-        # when n_obj_sub = n_obj_max, we would do the same thing twice
-        if params['n_obj_sub'] == params['n_obj_max']:
-            log.info('	read already reduced features')
-            f_all_reduced = dimred['features_reduced']
+        if params['n_obj_sub'] == params['n_obj_max']:                      # Similarly, when n_obj_sub = n_obj_max, we would do the same thing twice
+            log.info('	read already reduced features')                     # Log that the dimensionality reduction has already been done on the full data
+            f_all_reduced = dimred['features_reduced']                      # Store the full data, reduced features based on the subsample in 'f_all_reduced'
         else:
             log.info('	reduce all features based on current subsample')
             
             from sklearn.preprocessing import PowerTransformer, StandardScaler
         
-            #1 Apply Yeo-Johnson transformation
-            pt = PowerTransformer(method='yeo-johnson')
-            f_yeo = pt.fit_transform(f_all)
+            f_yeo = PowerTransformer(method='yeo-johnson').fit_transform(f_all)     # Perform Yeo-Johnson transformation to normalize dataset (correct distribution)
+            
+            f_all_scaled = dimred['scaler'].transform(f_yeo)                        # Transform the data to have zero mean and unit variance 
+            f_all_scaled = np.nan_to_num(f_all_scaled, copy=False)                  # since we have scaled the data, we can simply replace missing values by 0
 
-            f_all_scaled = dimred['scaler'].transform(f_yeo)
-            f_all_scaled = np.nan_to_num(f_all_scaled, copy=False)
+            f_all_scaled = np.vsplit(f_all_scaled, 10)                              # Split in chunks to apply the transformation (avoid memory errors on the GPU)
+            f_all_reduced = [dimred['dim_reducer'].transform(chunk) for chunk in f_all_scaled] # Apply the dimensionality reduction to each chunk
+            f_all_reduced = np.vstack(f_all_reduced)                                # Stack the reduced chunks back into a single array
 
-            # split in chunks to apply the transformation (avoid memory errors on the GPU)
-            f_all_scaled = np.vsplit(f_all_scaled, 10)
-            f_all_reduced = [dimred['dim_reducer'].transform(chunk) for chunk in f_all_scaled]
-            f_all_reduced = np.vstack(f_all_reduced)
-
-        log.info('	write to disk')
+        log.info('	write to disk')                                         # Log that the reduced features will be saved to disk
         with open(outfile, 'wb') as f:
-            pkl.dump(f_all_reduced, f)
+            pkl.dump(f_all_reduced, f)                                      # Save the full reduced features based on the subsample to a pickle file
 
-        # clean CUDA memory
-        rmm.reinitialize()
+        rmm.reinitialize()                                                  # Clean GPU memory (RAPIDS memory manager) to free resources
 
     return(f_all_reduced)
-
-
-def fast_merge(x, y, on, **kwargs):
-    """Merge two DataFrames based on a column
-
-    This is a faster implementation of .merge()
-
-    Args:
-        x,y (DataFrame): DataFrames to merge
-        on (string, int): name/index of the column to merge on
-        **kwargs: passed on .join()
-
-    Returns:
-        x (DataFrame): x with relevant rows of y appended by the join
-    """
-    x.set_index(on, inplace=True)
-    y.set_index(on, inplace=True)
-    x = x.join(y, **kwargs)
-    x.reset_index(inplace=True)
-    return(x)
-
-def safe_sample(x, size, **kwargs):
-    """Take a random sample of rows of a table with some conditions
-    
-    If size is larger than the number of rows of the table, just take all elements.
-    If the table has only one element, return an empty array.
-    
-    Args:
-        x (DataFrame): to sample rows from.
-        size (int): the sample size.
-        **kwargs: passed to pandas.sample() (useful for random_state for example)
-    
-    Returns:
-        smp (ndarray): the rows sampled from the DataFrame
-    """
-    import numpy as np
-    
-    nrows = x.shape[0]
-    if nrows == 1:
-        # return empty set
-        smp = x.iloc[np.arange(0, 0)]
-    elif nrows <= size:
-        # return all
-        smp = x
-    else:
-        # take sample
-        smp = x.sample(n=size, axis=0, ignore_index=False, replace=False, **kwargs)
-    return(smp)
-
-def sample_stratified_by_category(n, size, by, **kwargs):
-    """Sample rows of a table stratified according to a categorical variable
-
-    Args:
-        n (int): number of rows of the table.
-        size (int): number of elements to take.
-        by (ndarray or list): of length n, values of the categories to stratifiy by.
-        **kwargs: passed to pandas.sample()
-
-    Returns:
-        idx (ndarray): indexes of the rows sampled.
-    """
-    import pandas as pd
-    import numpy as np
-    
-    # compute number of elements to sample in each stratum
-    n_strata = len(np.unique(by))
-    n_per_stratum = int(size / n_strata)
-    # sample
-    df = pd.DataFrame({'strat': by})
-    smp = df.groupby('strat', group_keys=False).apply(safe_sample, size=n_per_stratum, **kwargs)
-    # and get indexes
-    idx = smp.index.values
-    return(idx)
-
-def sample_stratified_continuous(n, size, by, **kwargs):
-    """Sample rows of a table stratified according to a continuous variable
-
-    Args:
-        n (int): number of rows of the table.
-        size (int): number of elements to take.
-        by (ndarray or DataFrame): the continous variable(s) to stratify by. 
-        **kwargs: passed to pandas.sample()
-
-    Returns:
-        idx (ndarray of int): indexes of the rows of x sampled
-    """
-    import pandas as pd
-    
-    # cut the stratification columns in 5 pieces of ~ the same size
-    bydf = pd.DataFrame(by)
-    bydf = bydf.reset_index(drop=True)
-    for i in bydf:        
-        bydf[i] = pd.cut(bydf[i], bins=np.quantile(bydf[i], np.linspace(0, 1, 6)))
-
-    # compute number of elements to sample per stratum
-    # NB: ensure there are at least 2 per stratum
-    n_per_stratum = np.max([int(size / 5**by.shape[1]), 2])
-    
-    # sample
-    smp = bydf.groupby(bydf.columns.values.tolist(), group_keys=False).apply(safe_sample, size=n_per_stratum, **kwargs)
-    # and get indexes
-    idx = smp.index.values
-    
-    return(idx)
 
 def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref, tree_ref, params, log):
     """Evaluate this pipeline thanks to the ARI, DBCV metrics
@@ -585,154 +455,238 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
     Returns:
         results (DataFrame): containing the quality metrics
     """
+    # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
         f'~/datasets/morphopart/out_yeo/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
     )
-    if os.path.exists(outfile):
-         log.info('    load evaluation results')
-         with open(outfile, 'rb') as f:
-             results = pd.read_csv(f)
-         log.info('	done')
-
-    else :
-        log.info('	predict cluster number of all objects in the reduced features space')
+    if os.path.exists(outfile):                                                                     # Check if the file already exists
+         log.info('    load evaluation results')                                                    # Log that the evaluation has already been done
+         with open(outfile, 'rb') as f:                                                             # Open the csv file in read-binary mode
+             results = pd.read_csv(f)                                                               # Read the evaluation into 'results'
+         log.info('	done')                                                                          # Log that the evaluation is now read
+    else :                                                                                          # If the file doesn't exists
+        log.info('	predict cluster number of all objects in the reduced features space')           # Log the initiation of cluster assignment for all objects
         # make a DataFrame with cluster level as column index
         # NB: internally, this is likely using a nearest neighbour classifier
-        df = pd.read_csv( f'~/datasets/morphopart/{params.instrument}/taxa.csv.gz', usecols = ['objid','taxon'])
-        df= df[np.isin(df["objid"].values, f_all.index.values)]
-        df=df.set_index(df["objid"])
-        df=df.reindex(f_all.index)    
+        df = pd.read_csv( f'~/datasets/morphopart/{params.instrument}/taxa.csv.gz', usecols = ['objid','taxon']) # Load the taxonomy data (object IDs and taxon labels) from a compressed CSV file
+        df= df[np.isin(df["objid"].values, f_all.index.values)]                                                  # Filter the taxonomy data to include only objects present in all features dataset
+        df=df.set_index(df["objid"])                                                                             # Set 'objid' as the index to align with f_all
+        df=df.reindex(f_all.index)                                                                               # Reindex to ensure the same order as f_all for consistent alignment    
         
-        c_all = pd.DataFrame({params.n_clusters_tot: clust['clusterer'].predict(f_all_reduced)})
-        c_all["taxon"]=df["taxon"].values
+        c_all = pd.DataFrame({params.n_clusters_tot: clust['clusterer'].predict(f_all_reduced)})                 # Predict cluster assignments for all reduced feature vectors
+        c_all["taxon"]=df["taxon"].values                                                                        # Add the corresponding taxon labels to the cluster assignment DataFrame
 
-        if params.n_clusters_eval != params.n_clusters_tot:
-            # reduce to the number of clusters requested for evaluation
-            # = merge the level of the tree with the correct number of clusters
+        if params.n_clusters_eval != params.n_clusters_tot:                                                      # If the evaluation cluster count differs from the total (applies to KMeans–hierarchical approach)
+            # Reduce the clustering to the desired number of clusters for evaluation (i.e., merge the hierarchical clustering tree to reach the specified level)
             log.info('	reduce to the target number of clusters')
-            #c_all = fast_merge(c_all, tree[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot)
-            c_all[params.n_clusters_eval]= tree.iloc[:,params.n_clusters_eval-1].iloc[c_all[200]].values
             
+            # Map each object’s total-cluster assignment to its corresponding evaluated-cluster label using the hierarchical tree structure
+            #c_all = fast_merge(c_all, tree[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot) # Note: commented out because using fast_merge here reorders clusters by their labels, not by the original object IDs. This breaks the correspondence with the original data order.
+            c_all = c_all.merge(tree[[params.n_clusters_tot, params.n_clusters_eval]], left_on=params.n_clusters_tot, right_on=params.n_clusters_tot, how="left") #TODO to be check by JO
+            
+        log.info('	compute metrics score')                                                             # Log that metrics (e.g. Adjusted Rand Index, SIL, DIST, DBCV) computation is starting
+        c_all_ref = pd.DataFrame({params.n_clusters_tot: clusters_ref})                                 # Define the reference cluster assignments at the total cluster level
 
-        # compute metrics
-        log.info('	compute ARI score')
+        if params.n_clusters_eval != params.n_clusters_tot:                                             # If evaluating at a different cluster level, map the reference clusters to the desired number of clusters using the hierarchical tree
+            #c_all_ref = fast_merge(c_all_ref, tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot) # Note: commented out because using fast_merge here reorders clusters by their labels, not by the original object IDs. This breaks the correspondence with the original data order.
+            c_all_ref = c_all_ref.merge(tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], left_on=params.n_clusters_tot, right_on=params.n_clusters_tot, how="left") #TODO to be check by JO
 
-        # define the reference clusters (at n_cluster_eval level)
-        c_all_ref = pd.DataFrame({params.n_clusters_tot: clusters_ref})
-        # NB: if we are evaluating at n_clusters_tot, we do not need to add a column
-        if params.n_clusters_eval != params.n_clusters_tot:
-            #c_all_ref = fast_merge(c_all_ref, tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot)
-            c_all_ref[params.n_clusters_eval]= tree_ref.iloc[:,params.n_clusters_eval-1].iloc[c_all_ref[200]].values
-
-        from sklearn.metrics.cluster import adjusted_rand_score # = ARI score
-        score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)
+        # --------------------------------------------------------------------
+        # Compute ARI (Adjusted Rand Index)                                     # Range: -1 to 1 -> 1: Perfect agreement — the two clusterings are identical; 0: Random clustering — the agreement is what you’d expect by chance; Negative: Worse than random — clusters are anti-correlated with true labels.
+        # --------------------------------------------------------------------
+        log.info('	compute ARI score')                                                                                      # Log that Adjusted Rand Index computation is starting
+        from sklearn.metrics.cluster import adjusted_rand_score                                                             # Import the ARI metric from scikit-learn --> CPU
+        score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)     # Compute the Adjusted Rand Index between reference and predicted clusters
         
-        del c_all_ref, tree_ref
-        # from cuml.metrics.cluster.adjusted_rand_index import adjusted_rand_score
-        # score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)
-        # NB: returns negative values sometimes!
-
-        # subsample the data for DBCV and silouhette computation (too long otherwise)
-        n_repetitions = 5
+        # NOTE: The cuML ARI function is commented out here because on large datasets, it can produce incorrect or extremely large/small ARI values due to GPU float32 precision and overflow issues. Sometimes ARI_score reached -495 ...
+        #from cuml.metrics.cluster.adjusted_rand_index import adjusted_rand_score                                             # Import the GPU-accelerated Adjusted Rand Index (ARI) function from cuML
+        #score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)      # Compute the ARI score between reference and predicted clusters. Note: ARI can occasionally return negative values if the clustering is worse than random
+        
+        del c_all_ref, tree_ref                                                                                              # Clean up temporary DataFrames to free memory
+        
+        # --------------------------------------------------------------------
+        # Subsample the data for DBCV and Silhouette score computation
+        # (computing these metrics on the full dataset is too time-consuming)
+        # --------------------------------------------------------------------
+        n_repetitions = 5                                                                                                   # Number of subsampling repetitions for stability
+        
+        # Previous approach (commented out) sampled stratified by cluster category:
         # eval_subsamples = [sample_stratified_by_category(
-        #                      n=f_all_reduced.shape[0],
-        #                      size=params.n_obj_eval,
-        #                      by=c_all[params.n_clusters_eval].values,
-        #                      random_state=i)
-        #                      for i in range(n_repetitions)]
-        # NB: another possibility is to sample the reduced space, stratified by dimensions 1 and 2
-        #     but it may result in all points being in the same subsample and that throws DBCV out
+        #                      n=f_all_reduced.shape[0],                                                                    # Total number of points in dataset
+        #                      size=params.n_obj_eval,                                                                      # Number of points to include in each subsample
+        #                      by=c_all[params.n_clusters_eval].values,                                                     # Stratify by cluster category
+        #                      random_state=i)                                                                              # Random seed for reproducibility
+        #                      for i in range(n_repetitions)]                                                               # Repeat for the specified number of subsamples
+        
+        # Note: Another approach is to stratify using the first two dimensions of the reduced space,
+#       but naive sampling may put all points in one subsample, causing DBCV to fail.
+        
+        # Current approach: stratified sampling in continuous 2D space (first two components)
         eval_subsamples = [sample_stratified_continuous(
-                             n=f_all_reduced.shape[0],
-                             size=params.n_obj_eval,
-                             by=f_all_reduced[:,[0,1]],
-                             random_state=i)
-                             for i in range(n_repetitions)]
+                             n=f_all_reduced.shape[0],                                                                      # Total number of points in dataset
+                             size=params.n_obj_eval,                                                                        # Number of points to include in each subsample
+                             by=f_all_reduced[:,[0,1]],                                                                     # Stratify by first two reduced dimensions of reduced features
+                             random_state=i)                                                                                # Random seed for reproducibility
+                             for i in range(n_repetitions)]                                                                 # Repeat for the specified number of subsamples
 
-        # log.info('    compute DBCV')
+        
+        # --------------------------------------------------------------------
+        # Compute DBCV (Density-Based Cluster Validation) for each subsample   # Range: -1 to 1 -> 1: Perfect density separation — clusters are very dense and clearly separated; 0: Clusters are no better than random points (densities overlap); Negative: Poor clustering — points in the same cluster are not denser than points in other clusters.
+        # --------------------------------------------------------------------
+        # NOTE: The cuML ARI function is commented out here because we excluded HDBSCAN in the pipeline 
+        #log.info('    compute DBCV')                                                                                        # Log that Density-Based Cluster Validation computation is starting
         # import ipdb; ipdb.set_trace()
-        #
-        # import hdbscan
-        # # or https://github.com/FelSiq/DBCV but it is slower
-        #DBCVs = [hdbscan.validity.validity_index(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx], metric='euclidean') for idx in eval_subsamples]
+        #import hdbscan                                                                                                      # HDBSCAN library provides the validity_index function. Alternative implementation exists (e.g., https://github.com/FelSiq/DBCV), but slower.
+        #DBCVs = [hdbscan.validity.validity_index(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx], metric='euclidean') for idx in eval_subsamples] # Compute DBCV score for each subsample using cluster labels
 
-        log.info('	compute Silhouette score')
+        # --------------------------------------------------------------------
+        # Compute Silhouette score for each subsample                          # Range: -1 to 1 -> 1: clusters are well-separated and tight; 0: clusters overlap or are not clearly separated; Negative: clusters are poorly assigned; points are closer to other clusters
+        # --------------------------------------------------------------------
+        log.info('	compute Silhouette score')                                                                              # Log that Silhouette score computation is starting
         # import ipdb; ipdb.set_trace()
-        def safe_silhouette_score(X, labels):
-            from cuml.metrics.cluster.silhouette_score import cython_silhouette_score
+        
+        def safe_silhouette_score(X, labels):                                                                               # Define a safe Silhouette scoring function to handle single-cluster edge cases
+            """
+            Compute Silhouette score safely: returns NaN if all points belong to the same cluster.
+            Uses cuML's Cython-accelerated implementation for speed.
+            """
+            from cuml.metrics.cluster.silhouette_score import cython_silhouette_score                                       # Import cuML's GPU-accelerated Silhouette score function for fast clustering evaluation
             import numpy as np
-            if len(np.unique(labels))==1:
-                score = float('NaN')
+            if len(np.unique(labels))==1:                                                                                   # Check if all points are in the same cluster
+                score = float('NaN')                                                                                        # Single cluster: Silhouette undefined
             else:
-                score = cython_silhouette_score(X, labels)
+                score = cython_silhouette_score(X, labels)                                                                  # Compute Silhouette score with cuML
             return(score)
-        SILs = [safe_silhouette_score(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx]) for idx in eval_subsamples]
+        
+        SILs = [safe_silhouette_score(f_all_reduced[idx,:].astype('double'), labels=c_all[params.n_clusters_eval].values[idx]) for idx in eval_subsamples] # Compute Silhouette score for each subsample using the safe function
 
-        log.info('	compute pairwise distances in reduced space')
+        # --------------------------------------------------------------------
+        # Compute Pairwise distances in reduced space
+        # --------------------------------------------------------------------
+        log.info('	compute pairwise distances in reduced space')                                                           # Log that pairwise distance computation in the reduced feature space is starting
         # PCA that produces the _ref one is fitted on the full dataset while the other is fitted on the subset. They may not have the same number of components.
         # The number of components is fixed to the lower number components between the full dataset and the subset.
-        n_axis_ref=np.shape(f_all_reduced_ref)[1]
-        n_axis=np.shape(f_all_reduced)[1]
-        print(n_axis_ref, n_axis)
-        if n_axis_ref != n_axis:
-            fix_axis=min(n_axis_ref,n_axis)
-            DISTs = np.linalg.norm(f_all_reduced_ref[:,0:fix_axis] - f_all_reduced[:,0:fix_axis], axis=0)
-        else:
-            DISTs = np.linalg.norm(f_all_reduced_ref - f_all_reduced, axis=0)
+        n_axis_ref=np.shape(f_all_reduced_ref)[1]                                                                           # Number of components in the reference reduced space
+        n_axis=np.shape(f_all_reduced)[1]                                                                                   # Number of components in the current reduced space
+        print(n_axis_ref, n_axis)                                                                                           # Print the number of components for debugging
+        if n_axis_ref != n_axis:                                                                                            # If the number of components differs,
+            fix_axis=min(n_axis_ref,n_axis)                                                                                 # Take the lower number of components
+            DISTs = np.linalg.norm(f_all_reduced_ref[:,0:fix_axis] - f_all_reduced[:,0:fix_axis], axis=0)                   # Compute the Euclidean distance between corresponding components along each axis
+        else:                                                                                                               # If the number of components is the same, 
+            DISTs = np.linalg.norm(f_all_reduced_ref - f_all_reduced, axis=0)                                               # compute distance across all axes
 
-        # TODO compute purity of labels ?
-        clust_diversity_indices=[[cluster_id, diversity_index(list(c_all[c_all[params.n_clusters_eval]==cluster_id]["taxon"]))] for cluster_id in np.unique(c_all[params.n_clusters_eval].values)]
-        print(clust_diversity_indices)
+        # --------------------------------------------------------------------
+        # TODO Compute Purity of labels                                         # Range: 0 to 1 -> 1: each cluster contains points from only a single label (perfect match); 0: clusters are completely mixed 
+        # --------------------------------------------------------------------
+        log.info('	compute purity of labels')                                                                              # Log that computation of purity for taxonomic labels is starting
+        def compute_purity(df, cluster_col='cluster', label_col='taxon'):                                                   # Define a function to compute the purity of clustering with respect to known labels
+            total_points = len(df)                                                                                          # Total number of points in the dataset
+            purity_sum = 0                                                                                                  # Initialize sum of majority counts across clusters
 
-        log.info('	write to disk')
-        if sum(np.isnan(SILs))>0:
-            results = dict(params) | {
-                'ARI': score_ARI,
-                # record the actual number in the subsample used for the evaluation
-                # (there can be fewer than params.n_obj_eval if there are small clusters)
-                'n_obj_eval_actual': len(eval_subsamples[0]),
-                 #'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
-                'SIL': np.mean([~np.isnan(SILs)]), 'sdSIL': np.std([~np.isnan(SILs)]), 'nanSIL': sum(np.isnan(SILs)),
-                'DIST': np.mean(DISTs), 'sdDIST': np.std(DISTs)
-            }
-        else:
-            results = dict(params) | {
-                'ARI': score_ARI,
-                # record the actual number in the subsample used for the evaluation
-                # (there can be fewer than params.n_obj_eval if there are small clusters)
-                'n_obj_eval_actual': len(eval_subsamples[0]),
-                 #'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
-                'SIL': np.mean(SILs), 'sdSIL': np.std(SILs), 'nanSIL': sum(np.isnan(SILs)),
-                'DIST': np.mean(DISTs), 'sdDIST': np.std(DISTs)
-            }
+            for cluster_id in df[cluster_col].unique():                                                                     # Loop over each cluster
+                cluster_points = df[df[cluster_col] == cluster_id]                                                          # Extract all points belonging to this cluster
+                most_common_count = cluster_points[label_col].value_counts().max()                                          # Count occurrences of each label in the cluster and take the maximum (majority label count)
+                purity_sum += most_common_count                                                                             # Add to the weighted sum
 
-        results = pd.DataFrame(results, index=[0])
-        results.to_csv(outfile, index=False)
+            purity = purity_sum / total_points                                                                              # Divide by total number of points to get overall purity
+            return purity
+        
+        purity_score = compute_purity(c_all, cluster_col=params.n_clusters_eval, label_col='taxon')                         # Compute the purity score
+        print(f"Purity of clustering: {purity_score:.3f}")
+        
+        # --------------------------------------------------------------------
+        # TODO Compute ecological index (Simspons/Shannon)                      Shannon index: Higher → more diverse; Simpson index: Higher → less dominance; 
+        # --------------------------------------------------------------------
+        log.info('	compute purity of taxonomie')                                                           # Log that purity of taxonomie computation is starting
+        def diversity_index(list_input):                                                                    # Define a function to calculate diversity indices (Shannon and Simpson) for a list of items
+            """
+            Calculate Shannon and Simpson diversity indices for a given list.
+            Shannon index: measures entropy (uncertainty) in the distribution
+            Simpson index: measures probability that two randomly chosen items belong to the same category
+            """
+            import math
+            unique_base = set(list_input)                                                                   # Get the set of unique categories (taxa)
+            M   =  len(list_input)                                                                          # Total number of items
+            entropy_list = []                                                                               # List to store individual Shannon contributions
+            P_i_list = []                                                                                   # List to store squared probabilities for Simpson index
+            for base in unique_base:
+                n_i = list_input.count(base)                                                                # Count occurrences of this category
+                P_i = n_i/float(M)                                                                          # Probability of this category
+                entropy_i = P_i*(math.log(P_i))                                                             # Contribution to Shannon entropy
+                entropy_list.append(entropy_i)
+                P_i_list.append(P_i**2)                                                                     # Contribution to Simpson index
+            sh_entropy = -(sum(entropy_list))                                                               # Shannon entropy (sum of contributions, negated)
+            Si_index= 1/(sum(P_i_list))                                                                     # Simpson diversity index
+            return (sh_entropy, Si_index)                                                                   # Return both diversity metrics
+            
+        clust_diversity_indices=[[cluster_id, diversity_index(list(c_all[c_all[params.n_clusters_eval]==cluster_id]["taxon"]))] for cluster_id in np.unique(c_all[params.n_clusters_eval].values)]  # Compute diversity indices for each cluster
+        print(clust_diversity_indices)                                                                      # Print the computed diversity indices for inspection                                                                      
+        
+        # --------------------------------------------------------------------
+        # Compute Compacity index                                                # Range 0 to +∞ -> 0: clusters are tight and compact; high values: clusters are spread out / loose
+        # --------------------------------------------------------------------
+        log.info('	compacity of clusters')                                                                 # Log that compacity of clusters computation is starting
+        def compute_compacity(features, clusters):                                                          # Define a function to compute the compacity (tightness) of clusters
+            """
+            Compute cluster compacity for a clustering.
     
-    # clean CUDA memory
-    rmm.reinitialize()
+            features: numpy array (n_samples x n_features)
+            clusters: array-like of cluster assignments
+            """
+            clusters = np.array(clusters)                                                                   # Ensure cluster assignments are a NumPy array
+            unique_clusters = np.unique(clusters)                                                           # Find all unique cluster IDs
+            total_points = features.shape[0]                                                                # Total number of data points
+    
+            compacity_sum = 0.0                                                                             # Initialize weighted sum of cluster compacities
+
+            for cluster_id in unique_clusters:                                                              # Loop over each cluster to compute its individual compacity
+                idx = np.where(clusters == cluster_id)[0]                                                   # indices of points in the cluster
+                cluster_points = features[idx, :]                                                           # features of cluster points
+                centroid = np.mean(cluster_points, axis=0)                                                  # cluster centroid
+                distances = np.linalg.norm(cluster_points - centroid, axis=1)                               # Euclidean distances
+                cluster_compacity = np.mean(distances ** 2)                                                 # mean squared distance
+                compacity_sum += len(idx) * cluster_compacity                                               # weighted sum
+
+            overall_compacity = compacity_sum / total_points                                                # Overall compacity across all clusters
+            return overall_compacity                                                                        # Return the final score
+
+        compacity_score = compute_compacity(f_all_reduced, c_all[params.n_clusters_eval].values)            # Compute the overall compacity of clusters in the reduced feature space
+        print(f"Overall cluster compacity: {compacity_score:.3f}")                                          # Print the overall compacity score
+        
+        # --------------------------------------------------------------------
+        # Save all metrics
+        # --------------------------------------------------------------------
+        log.info('	write to disk')                                                                         # Log that the metrics will be saved to disk
+        if sum(np.isnan(SILs))>0:                                                                           # Check if any Silhouette scores are NaN
+            results = dict(params) | {                                                                      # Start with parameters dictionary and merge evaluation metrics
+                'ARI': score_ARI,                                                                           # Adjusted Rand Index for clustering vs reference
+                'n_obj_eval_actual': len(eval_subsamples[0]),                                               # Record the actual number of objects in the evaluation subsample. Note: Some subsamples may be smaller than params.n_obj_eval if clusters are small
+                #'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),                                            # DBCV metrics
+                'SIL': np.mean([~np.isnan(SILs)]), 'sdSIL': np.std([~np.isnan(SILs)]), 'nanSIL': sum(np.isnan(SILs)), # Silhouette score metrics
+                'DIST': np.mean(DISTs), 'sdDIST': np.std(DISTs),                                            # Pairwise distance metrics
+                'Purity': purity_score,                                                                     # Purity of labels score
+                'Compacity': compacity_score                                                                # Compacity index
+            }
+        else:
+            results = dict(params) | {                                                                      # Start with parameters dictionary and merge evaluation metrics
+                'ARI': score_ARI,                                                                           # Adjusted Rand Index for clustering vs reference
+                'n_obj_eval_actual': len(eval_subsamples[0]),                                               # Record the actual number of objects in the evaluation subsample. Note: Some subsamples may be smaller than params.n_obj_eval if clusters are small
+                #'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
+                'SIL': np.mean(SILs), 'sdSIL': np.std(SILs), 'nanSIL': sum(np.isnan(SILs)),                 # Silhouette score metrics
+                'DIST': np.mean(DISTs), 'sdDIST': np.std(DISTs),                                            # Pairwise distance metrics
+                'Purity': purity_score,                                                                     # Purity of labels score
+                'Compacity': compacity_score                                                                # Compacity index 
+            }
+
+        results = pd.DataFrame(results, index=[0])                                                          # Convert results dictionary into a single-row pandas DataFrame
+        results.to_csv(outfile, index=False)                                                                # Save results to CSV file
+    
+    rmm.reinitialize()                                                                                      # Clean GPU memory (RAPIDS memory manager) to free resources
 
     return(results)
 
-def diversity_index(list_input):
-    "Calculate Shannon and Simpson indices"
-    import math
-    unique_base = set(list_input)
-    M   =  len(list_input)
-    entropy_list = []
-    P_i_list = []
-    for base in unique_base:
-        n_i = list_input.count(base)
-        P_i = n_i/float(M)
-        entropy_i = P_i*(math.log(P_i))
-        entropy_list.append(entropy_i)
-        P_i_list.append(P_i**2)
-        
-    sh_entropy = -(sum(entropy_list))
-    Si_index= 1/(sum(P_i_list))
-
-    return (sh_entropy, Si_index)
-
+#-------- Function for extracting features from raw images --------------------#
+# Zooprocess features
 def get_uvplib_features(imagefilename, params, log):
     """  
     -        -
@@ -994,6 +948,8 @@ def get_uvplib_features(imagefilename, params, log):
     
         return(features)
 
+# Deep features
+# training
 def training_model_mobilenet(directory, params, log):
     
        from deep import tensorflow_tricks  # settings for tensorflow to behave nicely
@@ -1159,6 +1115,7 @@ def training_model_mobilenet(directory, params, log):
            workers=workers
        )
 
+# Define feature_extractor
 def mobilenet_feature_extractor(directory, params, log):
     import matplotlib.pyplot as plt # science packages
     import tensorflow as tf
@@ -1191,12 +1148,16 @@ def mobilenet_feature_extractor(directory, params, log):
         # Lis le log de l'entrainement et fais un plot. Tu veux que la val_loss et val_accuracy saturent
         df = pd.read_csv(ckpt_dir + '/training_log.tsv', sep='\t')
     df = df.drop(['batch', 'learning_rate'], axis='columns')
-
-    #df.plot(x='step', subplots=True)
-    #plt.show()
-
-    #df.plot(x='epoch', subplots=True)
-    #plt.show()
+    
+    output_path = os.path.join(os.path.expanduser(ckpt_dir), f'step.png')
+    df.plot(x='step', subplots=True)
+    plt.savefig(output_path)
+    plt.close()
+    
+    output_path = os.path.join(os.path.expanduser(ckpt_dir), f'epoch.png')
+    df.plot(x='epoch', subplots=True)
+    plt.savefig(output_path)
+    
     # define best_epoch
     # Il faut choisir l'epoch de val_loss minimale et val_accuracy maximale.
     print(df)
@@ -1218,7 +1179,8 @@ def mobilenet_feature_extractor(directory, params, log):
 
     # save feature extractor (just in case)
     my_fe.save('cnn_mobilenet_v2_035_128_5_384/'+params.instrument+'/feature_extractor')
-                                                                    
+
+# extract deep features for raw images                                                                     
 def get_mobilenet_features(directory, params, obj_id, log):
     import tensorflow as tf
     from deep import progress # custom functions to track progress of training/prediction
@@ -1279,3 +1241,109 @@ def get_mobilenet_features(directory, params, obj_id, log):
     f_all = f_all.rename(columns=str) # parquet need strings as column names
     
     return(f_all)
+
+
+#------------------ Additional helper functions -------------------------------#
+def fast_merge(x, y, on, **kwargs):
+    """Merge two DataFrames based on a column
+
+    This is a faster implementation of .merge()
+
+    Args:
+        x,y (DataFrame): DataFrames to merge
+        on (string, int): name/index of the column to merge on
+        **kwargs: passed on .join()
+
+    Returns:
+        x (DataFrame): x with relevant rows of y appended by the join
+    """
+    x.set_index(on, inplace=True)
+    y.set_index(on, inplace=True)
+    x = x.join(y, **kwargs)
+    x.reset_index(inplace=True)
+    return(x)
+
+def safe_sample(x, size, **kwargs):
+    """Take a random sample of rows of a table with some conditions
+    
+    If size is larger than the number of rows of the table, just take all elements.
+    If the table has only one element, return an empty array.
+    
+    Args:
+        x (DataFrame): to sample rows from.
+        size (int): the sample size.
+        **kwargs: passed to pandas.sample() (useful for random_state for example)
+    
+    Returns:
+        smp (ndarray): the rows sampled from the DataFrame
+    """
+    import numpy as np
+    
+    nrows = x.shape[0]
+    if nrows == 1:
+        # return empty set
+        smp = x.iloc[np.arange(0, 0)]
+    elif nrows <= size:
+        # return all
+        smp = x
+    else:
+        # take sample
+        smp = x.sample(n=size, axis=0, ignore_index=False, replace=False, **kwargs)
+    return(smp)
+
+def sample_stratified_by_category(n, size, by, **kwargs):
+    """Sample rows of a table stratified according to a categorical variable
+
+    Args:
+        n (int): number of rows of the table.
+        size (int): number of elements to take.
+        by (ndarray or list): of length n, values of the categories to stratifiy by.
+        **kwargs: passed to pandas.sample()
+
+    Returns:
+        idx (ndarray): indexes of the rows sampled.
+    """
+    import pandas as pd
+    import numpy as np
+    
+    # compute number of elements to sample in each stratum
+    n_strata = len(np.unique(by))
+    n_per_stratum = int(size / n_strata)
+    # sample
+    df = pd.DataFrame({'strat': by})
+    smp = df.groupby('strat', group_keys=False).apply(safe_sample, size=n_per_stratum, **kwargs)
+    # and get indexes
+    idx = smp.index.values
+    return(idx)
+
+def sample_stratified_continuous(n, size, by, **kwargs):
+    """Sample rows of a table stratified according to a continuous variable
+
+    Args:
+        n (int): number of rows of the table.
+        size (int): number of elements to take.
+        by (ndarray or DataFrame): the continous variable(s) to stratify by. 
+        **kwargs: passed to pandas.sample()
+
+    Returns:
+        idx (ndarray of int): indexes of the rows of x sampled
+    """
+    import pandas as pd
+    
+    # cut the stratification columns in 5 pieces of ~ the same size
+    bydf = pd.DataFrame(by)
+    bydf = bydf.reset_index(drop=True)
+    for i in bydf:        
+        bydf[i] = pd.cut(bydf[i], bins=np.quantile(bydf[i], np.linspace(0, 1, 6)))
+
+    # compute number of elements to sample per stratum
+    # NB: ensure there are at least 2 per stratum
+    n_per_stratum = np.max([int(size / 5**by.shape[1]), 2])
+    
+    # sample
+    smp = bydf.groupby(bydf.columns.values.tolist(), group_keys=False).apply(safe_sample, size=n_per_stratum, **kwargs)
+    # and get indexes
+    idx = smp.index.values
+    
+    return(idx)
+
