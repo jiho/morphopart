@@ -35,7 +35,7 @@ def get_features(directory, params, log):
     """
     # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out_yeo/features_all__{params.instrument}_{params.features}_{params.n_obj_max}.pickle'
+        f'~/datasets/morphopart/out_test/features_all__{params.instrument}_{params.features}_{params.n_obj_max}.pickle'
     )
 
     if os.path.exists(outfile):                                                         # Check if the file already exists
@@ -70,7 +70,7 @@ def get_features(directory, params, log):
         else :
             log.info(' extract features')                                               # Log that the extraction features will start
             image_dir='/home/jiho/datasets/morphopart/'+params.instrument+'/orig_imgs/' # Directory containing the raw images
-            #image_dir='/home/jiho/datasets/morphopart/all/UVP5SD/'
+            #image_dir='/home/jiho/datasets/morphopart/all/UVP5SD/'output'n_clusters
             
             arr = os.listdir(image_dir);                                        # List all files in the image directory
             # Determine the image file format based on the instrument
@@ -143,7 +143,7 @@ def get_features(directory, params, log):
     """
 
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out_yeo/features_all__{params.instrument}_{params.features}_{params.n_obj_max}.pickle'
+        f'~/datasets/morphopart/out_test/features_all__{params.instrument}_{params.features}_{params.n_obj_max}.pickle'
     )
 
     if os.path.exists(outfile):
@@ -191,7 +191,7 @@ def subsample_features(f_all, params, log):
     """
     # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out_yeo/features_subset__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}.pickle'
+        f'~/datasets/morphopart/out_test/features_subset__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}.pickle'
     )
 
     if os.path.exists(outfile):                     # Check if the file already exists
@@ -233,7 +233,7 @@ def reduce_dimension(f_sub, params, log):
     """
     # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out_yeo/dimred__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}.pickle'
+        f'~/datasets/morphopart/out_test/dimred__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}.pickle'
     )
 
     if os.path.exists(outfile):                                                 # Check if the file already exists
@@ -315,7 +315,7 @@ def cluster(f_sub_reduced, params, log):
     """
     # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out_yeo/clust__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}.pickle'
+        f'~/datasets/morphopart/out_test/clust__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}.pickle'
     )
 
     if os.path.exists(outfile):                                             # Check if the file already exists
@@ -324,26 +324,25 @@ def cluster(f_sub_reduced, params, log):
             output = pkl.load(f)                                            # Load clusterer, centroïds & clusters
 
     else :
-        all_outputs = {}
+        output = {}
         if params.clust_method=='Kmean_seq':
             
-            log.info('	Clusterer instantiated via the sequential K-means approach')
-            import cuml                                                         # Import RAPIDS cuML for GPU-accelerated Kmean
-            for n_clusters in range(2, params.n_clusters_tot + 1):                  # Loop over cluster numbers from 1 to n_clusters_tot
-                clust = cuml.KMeans(n_clusters=n_clusters,                          # Initialize Kmean with a setting the total number of clusters
-                               init='scalable-k-means++', n_init=10,                # Use scalable KMeans++ initialization and the algorithm will be run 10 times with different centroid seeds
-                               random_state=params.replicate)                       # Ensure reproducible clustering for each replicate
+            log.info('	Clusterer instantiated via the sequential K-means approach')    # Log that Kmean_seq is starting
+            import cuml                                                                 # Import RAPIDS cuML for GPU-accelerated Kmean
+            for n_clusters in range(2, params.n_clusters_tot + 1):                      # Loop over cluster numbers from 1 to n_clusters_tot
+                clust = cuml.KMeans(n_clusters=n_clusters,                              # Initialize Kmean with a setting the total number of clusters
+                               init='scalable-k-means++', n_init=10,                    # Use scalable KMeans++ initialization and the algorithm will be run 10 times with different centroid seeds
+                               random_state=params.replicate)                           # Ensure reproducible clustering for each replicate
 
-                clust.fit(f_sub_reduced)                                            # Fit clustering to the reduced data
+                clust.fit(f_sub_reduced)                                                # Fit clustering to the reduced data
 
-                #log.info('	define cluster centroids')                              # Log that cluster centroids are being extracted
-                centroids = clust.cluster_centers_                                  # Retrieve the coordinates of the cluster centroids from the fitted KMeans model
+                #log.info('	define cluster centroids')                                  # Log that cluster centroids are being extracted
+                centroids = clust.cluster_centers_                                      # Retrieve the coordinates of the cluster centroids from the fitted KMeans model
 
-                #log.info('	compute cluster membership')                            # Log that cluster assignments for each data point will be computed
-                clusters = clust.predict(f_sub_reduced)                             # Predict the cluster label for each reduced feature vector
+                #log.info('	compute cluster membership')                                # Log that cluster assignments for each data point will be computed
+                clusters = clust.predict(f_sub_reduced)                                 # Predict the cluster label for each reduced feature vector
                 
-                print(n_clusters)
-                all_outputs[n_clusters] = {'clusterer': clust, 'centroids': centroids, 'clusters': clusters} # Store all outpouts
+                output[n_clusters] = {'n_clusters': n_clusters, 'clusterer': clust, 'centroids': centroids, 'clusters': clusters} # Store all outpouts
                     
         elif params.clust_method=='Kmean_hclust':
             
@@ -361,43 +360,37 @@ def cluster(f_sub_reduced, params, log):
             #log.info('	compute cluster membership')                            # Log that cluster assignments for each data point will be computed
             clusters = clust.predict(f_sub_reduced)                             # Predict the cluster label for each reduced feature vector
             
-            all_outputs = {'clusterer': clust, 'centroids': centroids, 'clusters': clusters} # Store all outpouts
+            output = {'clusterer': clust, 'centroids': centroids, 'clusters': clusters} # Store all outpouts
         
         elif params.clust_method=='Kmean_bisecting':
             
-            log.info('	Clusterer instantiated via the the bissecting k-means approach')
-            from sklearn.cluster import BisectingKMeans
-            for n_clusters in range(2, params.n_clusters_tot + 1):
-                # Initialize the BisectingKMeans clusterer
-                clust = BisectingKMeans(
-                    n_clusters=n_clusters,       # Current number of clusters
-                    n_init=10,                   # Number of centroid seeds
-                    random_state=params.replicate
-                )
+            log.info('	Clusterer instantiated via the the bissecting k-means approach')    # Log that Bisecting_Kmean is starting
+            clust = BisectingKMeansTree(                                                    # Initialize the BisectingKMeansTree clusterer
+                    n_clusters=params.n_clusters_tot,                                       # Current number of clusters
+                    n_init=10,                                                              # Number of centroid seeds
+                    random_state=params.replicate)                                          # Ensure reproducible clustering for each replicate
     
-                # Fit clustering on the reduced data
-                clust.fit(dimred['features_reduced'])
+            clust.fit(dimred['features_reduced'])                                       # Fit clustering on the reduced data
     
-                #log.info('    Extracting cluster centroids')
-                centroids = clust.cluster_centers_      # Cluster centroids
-    
-                #log.info('    Computing cluster membership')
-                clusters = clust.predict(dimred['features_reduced'])  # Cluster labels
+            #log.info('    Computing cluster membership')                               # Log that cluster assignments for each data point will be computed
+            clusters = clust.predict(dimred['features_reduced'])                        # Predict the cluster label for each reduced feature vector
+            
+            #log.info('    Extracting cluster centroids')                               # Log that cluster centroids are being extracted
+            centroids = clust._centers_per_step                                          # Retrieve the coordinates of the cluster centroids from the fitted KMeans model
                 
-                print(n_clusters)
-                all_outputs[n_clusters] = {'n_clusters': n_clusters, 'clusterer': clust, 'centroids': centroids, 'clusters': clusters} # Store all outpouts
+            output = {'clusterer': clust, 'centroids': centroids, 'clusters': clusters}  # Store all outpouts
                                                         
         else :
             print ("algo not included")
         
         # Save results to a file with the number of clusters in the filename
-        #with open(outfile, 'wb') as f:
-        #    pkl.dump(all_outputs, f)                                             # Save the KMeans model, centroids, and cluster assignments to a pickle file
+        with open(outfile, 'wb') as f:
+            pkl.dump(output, f)                                             # Save the KMeans model, centroids, and cluster assignments to a pickle file
             
         rmm.reinitialize()                                                       # Clean GPU memory (RAPIDS memory manager) to free resources
     return(output)
 
-def hierarchize(clust, params, log):
+def hierarchize(centroids, params, log):
     """Build a hierachical tree of centroids
 
     Use AgglomerativeClustering to build a hiearchical tree of centroids and compute the cluster values at all cutting levels.
@@ -413,7 +406,7 @@ def hierarchize(clust, params, log):
     """
     # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out_yeo/tree__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}_{params.linkage}.pickle'
+        f'~/datasets/morphopart/out_test/tree__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}_{params.linkage}.pickle'
     )
 
     if os.path.exists(outfile):                                 # Check if the file already exists
@@ -422,26 +415,21 @@ def hierarchize(clust, params, log):
             tree = pkl.load(f)                                  # Load hierarchical classification 
 
     else :
-        if params.clust_method=='Kmean_hclust':
-            log.info('	define tree of centroids')                  # Log that the hierarchical tree of centroids is being computed
+        log.info('	define tree of centroids')                  # Log that the hierarchical tree of centroids is being computed
 
-            from sklearn.cluster import AgglomerativeClustering
-            centroids=clust['centroids']
-            n = centroids.shape[0]                                  # Number of centroids from the previous KMeans clustering. NB: should be params.n_clusters_tot, but we may as well drop this dependency
-            tree = np.zeros([n,n]).astype(int)                      # Initialize an empty array to store hierarchical cluster labels for each centroid
-            for i in range(0,n):                                    # Build a hierarchical clustering tree by iteratively clustering centroids
-                hclust = AgglomerativeClustering(n_clusters=i+1, linkage=params.linkage)        # Perform agglomerative clustering with i+1 clusters
-                clusters = hclust.fit_predict(centroids)            # Assign each centroid to a cluster
-                tree[:,i] = clusters                                # Store cluster labels for a number of clusters
-            tree = pd.DataFrame(tree)                               # Convert the tree to a pandas DataFrame for easier handling
-            tree.columns = np.arange(1,n+1)                         # Columns correspond to the number of clusters
-            
-            #log.info('	write to disk')                             # Log that the hierarchical tree will be saved
-            #with open(outfile, 'wb') as f:
-            #    pkl.dump(tree, f)                                   # Save the hierarchical tree to a pickle file
-        else :
-            print (f"Clustering method {params.clust_method} selected. Hierarchical classification is skipped for this method.")
-            return None
+        from sklearn.cluster import AgglomerativeClustering
+        n = centroids.shape[0]                                  # Number of centroids from the previous KMeans clustering. NB: should be params.n_clusters_tot, but we may as well drop this dependency
+        tree = np.zeros([n,n]).astype(int)                      # Initialize an empty array to store hierarchical cluster labels for each centroid
+        for i in range(0,n):                                    # Build a hierarchical clustering tree by iteratively clustering centroids
+            hclust = AgglomerativeClustering(n_clusters=i+1, linkage=params.linkage)        # Perform agglomerative clustering with i+1 clusters
+            clusters = hclust.fit_predict(centroids)            # Assign each centroid to a cluster
+            tree[:,i] = clusters                                # Store cluster labels for a number of clusters
+        tree = pd.DataFrame(tree)                               # Convert the tree to a pandas DataFrame for easier handling
+        tree.columns = np.arange(1,n+1)                         # Columns correspond to the number of clusters
+        
+        log.info('	write to disk')                             # Log that the hierarchical tree will be saved
+        with open(outfile, 'wb') as f:
+            pkl.dump(tree, f)                                   # Save the hierarchical tree to a pickle file
 
     return(tree)
 
@@ -459,7 +447,7 @@ def transform_features(f_all, dimred, params, log):
     """
     # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out_yeo/features_all_reduced__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}.pickle'
+        f'~/datasets/morphopart/out_test/features_all_reduced__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}.pickle'
     )
 
     if os.path.exists(outfile):                                             # Check if the file already exists
@@ -512,7 +500,7 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
     """
     # Create the full path to the output pickle file based on the current parameters
     outfile = os.path.expanduser(
-        f'~/datasets/morphopart/out_yeo/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
+        f'~/datasets/morphopart/out_test/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
     )
     if os.path.exists(outfile):                                                                     # Check if the file already exists
          log.info('    load evaluation results')                                                    # Log that the evaluation has already been done
@@ -540,22 +528,28 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
                 #c_all = fast_merge(c_all, tree[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot) # Note: commented out because using fast_merge here reorders clusters by their labels, not by the original object IDs. This breaks the correspondence with the original data order.
                 c_all = c_all.merge(tree[[params.n_clusters_tot, params.n_clusters_eval]], left_on=params.n_clusters_tot, right_on=params.n_clusters_tot, how="left")
             
-            log.info('	compute metrics score')                                                             # Log that metrics (e.g. Adjusted Rand Index, SIL, DIST, DBCV) computation is starting
+            log.info('	compute metrics score')                                                                         # Log that metrics (e.g. Adjusted Rand Index, SIL, DIST, DBCV) computation is starting
             c_all_ref = pd.DataFrame({params.n_clusters_tot: clusters_ref['clusters']})                                 # Define the reference cluster assignments at the total cluster level
 
-            if params.n_clusters_eval != params.n_clusters_tot:                                             # If evaluating at a different cluster level, map the reference clusters to the desired number of clusters using the hierarchical tree
-            #c_all_ref = fast_merge(c_all_ref, tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot) # Note: commented out because using fast_merge here reorders clusters by their labels, not by the original object IDs. This breaks the correspondence with the original data order.
-            c_all_ref = c_all_ref.merge(tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], left_on=params.n_clusters_tot, right_on=params.n_clusters_tot, how="left")
+            if params.n_clusters_eval != params.n_clusters_tot:                                                         # If evaluating at a different cluster level, map the reference clusters to the desired number of clusters using the hierarchical tree
+                #c_all_ref = fast_merge(c_all_ref, tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], on=params.n_clusters_tot) # Note: commented out because using fast_merge here reorders clusters by their labels, not by the original object IDs. This breaks the correspondence with the original data order.
+                c_all_ref = c_all_ref.merge(tree_ref[[params.n_clusters_tot, params.n_clusters_eval]], left_on=params.n_clusters_tot, right_on=params.n_clusters_tot, how="left")
         
-            del c_all_ref, tree_ref                                                                                              # Clean up temporary DataFrames to free memory
-            
+            del tree_ref                                                                                                # Clean up temporary DataFrames to free memory
         
-        elif params.clust_method == 'Kmean_seq' or params.clust_method == 'Kmean_bisecting':
-            c_all = pd.DataFrame({params.n_clusters_eval: clust[n_clusters_eval]['clusterer'].predict(f_all_reduced)})                 # Predict cluster assignments for all reduced feature vectors
-            c_all["taxon"]=df["taxon"].values                                                                                         # Add the corresponding taxon labels to the cluster assignment DataFrame
+        elif params.clust_method == 'Kmean_seq':
+            c_all = pd.DataFrame({params.n_clusters_eval: clust[params.n_clusters_eval]['clusterer'].predict(f_all_reduced)})                 # Predict cluster assignments for all reduced feature vectors
+            c_all["taxon"]=df["taxon"].values                                                                                          # Add the corresponding taxon labels to the cluster assignment DataFrame
             
-            c_all_ref = pd.DataFrame({params.n_clusters_eval: clusters_ref[n_clusters_eval]['clusters']})                              # Define the reference cluster assignments at the total cluster level
-        else
+            c_all_ref = pd.DataFrame({params.n_clusters_eval: clusters_ref[params.n_clusters_eval]['clusters']})                              # Define the reference cluster assignments at the total cluster level
+        
+        elif params.clust_method == 'Kmean_bisecting':
+            c_all = pd.DataFrame({params.n_clusters_eval: clust['clusterer'].predict(f_all_reduced)[:,params.n_clusters_eval-1]})      # Predict cluster assignments for all reduced feature vectors
+            c_all["taxon"]=df["taxon"].values                                                                                          # Add the corresponding taxon labels to the cluster assignment DataFrame
+            
+            c_all_ref = pd.DataFrame({params.n_clusters_eval: clusters_ref['clusters'][:,params.n_clusters_eval-1]})                   # Define the reference cluster assignments at the total cluster level
+        
+        else :
             print('Error all object in the reduced space cannot be predict')
         
         # --------------------------------------------------------------------
@@ -569,6 +563,7 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
         #from cuml.metrics.cluster.adjusted_rand_index import adjusted_rand_score                                             # Import the GPU-accelerated Adjusted Rand Index (ARI) function from cuML
         #score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)      # Compute the ARI score between reference and predicted clusters. Note: ARI can occasionally return negative values if the clustering is worse than random
         
+        del c_all_ref                                                                                                         # Clean up temporary DataFrames to free memory
         # --------------------------------------------------------------------
         # Subsample the data for DBCV and Silhouette score computation
         # (computing these metrics on the full dataset is too time-consuming)
@@ -1017,7 +1012,7 @@ def get_uvplib_features(imagefilename, params, log):
 # training
 def training_model_mobilenet(directory, params, log):
     
-       from deep import tensorflow_tricks  # settings for tensorflow to behave nicely
+       from deep import tensorflow_tricks                           # settings for tensorflow to behave nicely
 
        import pandas as pd
        # pd.set_option('display.max_columns', None)
@@ -1026,8 +1021,8 @@ def training_model_mobilenet(directory, params, log):
        from sklearn import metrics
 
        from importlib import reload
-       from deep import dataset            # custom data generator
-       from deep import cnn                # custom functions for CNN generation
+       from deep import dataset                                     # custom data generator
+       from deep import cnn                                         # custom functions for CNN generation
        dataset = reload(dataset)
        cnn = reload(cnn)
        
@@ -1248,7 +1243,7 @@ def mobilenet_feature_extractor(directory, params, log):
 # extract deep features for raw images                                                                     
 def get_mobilenet_features(directory, params, obj_id, log):
     import tensorflow as tf
-    from deep import progress # custom functions to track progress of training/prediction
+    from deep import progress           # custom functions to track progress of training/prediction
     from deep import dataset            # custom data generator
     import pandas as pd
     import tf_keras as keras
@@ -1411,4 +1406,104 @@ def sample_stratified_continuous(n, size, by, **kwargs):
     idx = smp.index.values
     
     return(idx)
+
+
+import numpy as np
+
+from sklearn.cluster import BisectingKMeans
+from sklearn.utils.validation import check_is_fitted
+from sklearn.utils.extmath import row_norms
+from sklearn.cluster._kmeans import _labels_inertia_threadpool_limit
+
+class BisectingKMeansTree(BisectingKMeans):                                                     # define a new class BisectingKMeansTree that inherits from BisectingKMeans
+    import numpy as np
+
+    from sklearn.cluster import BisectingKMeans
+    from sklearn.utils.validation import check_is_fitted
+    from sklearn.utils.extmath import row_norms
+    from sklearn.cluster._kmeans import _labels_inertia_threadpool_limit
+    
+    # redefine the predict method to 
+    # (1) allows an argument k = the maximum number of clusters to predict
+    # (2) predict labels at all levels from 0 to k 
+    def predict(self, X, k=None, sample_weight=None):
+        # check arguments like the regular predict() method does
+        check_is_fitted(self)
+        X = self._check_test_data(X)
+        X = X - self._X_mean
+        x_squared_norms = row_norms(X, squared=True)
+        sample_weight = np.ones_like(x_squared_norms)
+        
+        # if k is not specified, extract everything (the default)
+        if k is None:
+            k = self._n_features_out
+      
+        # initialise empty labels
+        labels = np.zeros((X.shape[0], k), dtype=np.int32)
+        
+        # initialise the nodes dict (with the root node)
+        # it is defined as {label: node}
+        nodes = {0: self._bisecting_tree}
+        
+        self._centers_per_step = []   # list of centers at each step
+        # centers: only root center available
+        self._centers_per_step.append(np.asarray([nodes[0].center], dtype=float))
+        # TODO record tree
+
+        for step in range(k-1):
+          # get the cluster to cut next
+          # = the one of maximum inertia/number of element
+          scores = {k:v.score for k,v in nodes.items()}
+          labmax = max(scores, key=scores.get)
+          
+          # define which label it corresponds too
+          mask = (labels[:,step] == labmax)
+          
+          # "split" this cluster the K-Means way and define the two new labels
+          # NB: actually, this just assigns labels based on the distance from
+          #     the centers
+          centers = np.vstack((nodes[labmax].left.center,
+                               nodes[labmax].right.center))
+          labs = _labels_inertia_threadpool_limit(
+              X[mask,:],
+              sample_weight[mask],
+              centers,
+              return_inertia=False,
+          )
+          # copy labels from the previous clustering step
+          labels[:,step+1] = labels[:,step]
+          # replace the labels of the splitted cluster
+          # NB: we number them starting from step * k to avoid cluster label
+          #     collisions across the clustering steps. We will relabel them
+          #     from 0 to step afterwards
+          label_offset = step * k
+          labels[mask,step+1] = labs + label_offset
+          
+          # update the list of nodes
+          # NB: 0 is the left cluster, 1 is the right cluster, by definition
+          #     of the centers
+          new_nodes = {0 + label_offset : nodes[labmax].left,
+                       1 + label_offset : nodes[labmax].right}
+          drop = nodes.pop(labmax)
+          nodes.update(new_nodes)
+          
+          # collect centers in order of node keys for reproducibility
+          ordered_keys = sorted(nodes.keys())
+          step_centers = np.vstack([nodes[k].center for k in ordered_keys])
+          self._centers_per_step.append(step_centers)
+        
+        def relabel(x):
+            """Relabel clusters
+            
+            Rank unique values of x in increasing order and relabel them from
+            0 to the total number of unique values.
+            """
+            lab = np.unique(x)
+            dict = {l:i for i,l in enumerate(lab)}
+            return [dict[y] for y in x]
+        
+        # apply the relabelling to each column of the labels = to each step
+        labels = np.apply_along_axis(relabel, axis=0, arr=labels)
+
+        return labels
 

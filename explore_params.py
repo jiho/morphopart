@@ -62,7 +62,7 @@ for i in range(params_grid.shape[0]):
 
     # skip the computation if the result is already computed
     results_file = os.path.expanduser(
-        f'~/datasets/morphopart/out_yeo/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
+        f'~/datasets/morphopart/out_test/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
     )
     if os.path.exists(results_file):
         log.info('	skip: everything done') # ----
@@ -119,8 +119,10 @@ for i in range(params_grid.shape[0]):
     step_params = step_params + ['linkage']
     if all(params[step_params] == previous_params[step_params]):
         log.info('	skip: clusters tree already built')
-    else:
+    elif params.clust_method=='Kmean_hclust':
         tree = hierarchize(clust['centroids'], params[step_params], log)
+    else:
+        print (f"Clustering method {params.clust_method} selected. Hierarchical classification is skipped for this method.")
 
 
 
@@ -134,7 +136,7 @@ for i in range(params_grid.shape[0]):
     else:
         log.info('	load reference dimensionality reduction')
         dimred_ref_file = os.path.expanduser(
-            '~/datasets/morphopart/out_yeo/dimred__'
+            '~/datasets/morphopart/out_test/dimred__'
             f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}'
             '.pickle'
         )
@@ -147,7 +149,7 @@ for i in range(params_grid.shape[0]):
     else:
         log.info('	load reference clustering')
         cluster_ref_file = os.path.expanduser(
-            '~/datasets/morphopart/out_yeo/clust__'
+            '~/datasets/morphopart/out_test/clust__'
             f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}'
             '.pickle'
         )
@@ -157,21 +159,26 @@ for i in range(params_grid.shape[0]):
     ref_params = ref_params + ['linkage']
     if all(params[ref_params] == previous_params[ref_params]):
         log.info('	skip: reference cluster tree already loaded')
-    else:
+    elif params.clust_method=='Kmean_hclust':
         log.info('	load reference cluster tree')
         tree_ref_file = os.path.expanduser(
-            '~/datasets/morphopart/out_yeo/tree__'
+            '~/datasets/morphopart/out_test/tree__'
             f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}_{params.linkage}'
             '.pickle'
         )
         with open(tree_ref_file, 'rb') as f:
             tree_ref = pkl.load(f)
+    else:
+        print (f"Clustering method {params.clust_method} selected. Hierarchical classification is skipped for this method.")
+        
 
     step_params = step_params + ['n_clusters_eval', 'n_obj_eval']
     if all(params[step_params] == previous_params[step_params]):
         log.info('	skip: evaluation already performed')
-    else:
+    elif params.clust_method=='Kmean_hclust':
         results = evaluate(f_all, f_all_reduced, clust, tree, dimred_ref['features_reduced'], cluster_ref, tree_ref, params[step_params], log)
+    else:
+        results = evaluate(f_all, f_all_reduced, clust, None, dimred_ref['features_reduced'], cluster_ref, None, params[step_params], log)
  
 
     # set params for next turn of the loop
