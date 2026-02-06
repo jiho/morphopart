@@ -15,6 +15,11 @@ import cuml
 import rmm
 import re
 
+from sklearn.cluster import BisectingKMeans
+from sklearn.utils.validation import check_is_fitted
+from sklearn.utils.extmath import row_norms
+from sklearn.cluster._kmeans import _labels_inertia_threadpool_limit
+from sklearn.base import BaseEstimator, TransformerMixin
 #------------------------ Core pipeline function -------------------------------#
 
 def get_features(directory, params, log):
@@ -69,7 +74,7 @@ def get_features(directory, params, log):
                 pkl.dump(f_all, f)                                                      # Save the features DataFrame to a pickle file for faster future loading
         else :
             log.info(' extract features')                                               # Log that the extraction features will start
-            image_dir='/home/jiho/datasets/morphopart/'+params.instrument+'/orig_imgs/' # Directory containing the raw images
+            image_dir='/home/irisson/datasets/morphopart/'+params.instrument+'/orig_imgs/' # Directory containing the raw images
             #image_dir='/home/jiho/datasets/morphopart/all/UVP5SD/'output'n_clusters
             
             arr = os.listdir(image_dir);                                        # List all files in the image directory
@@ -241,23 +246,55 @@ def reduce_dimension(f_sub, params, log):
         with open(outfile, 'rb') as f:
             output = pkl.load(f)                                                # Load subsampled, reduced features
     else:
-        log.info('	scale data')                                                # Log that feature scaling on the subsampled dataset is starting
+        log.info('	data preparation')                                                # Log that feature scaling on the subsampled dataset is starting
         
+        if params.features =='uvplib':                                          # Clean dataset before transformer and scaler for dimensional reduction
+            cols_to_drop = ["x:ym","angle",                                     # meaningless, related to location/orientation on image 
+                            "bbox_area", "width", "height",                     # property of image, not particle
+                            "esd",                                              # directly proportional to area
+                            "min", "mode",                                      # unusable distributions
+                            "range"]                                            # same as max                 
+
+            cols_xy = [c for c in f_sub.columns if c.startswith(("x", "y"))]
+            cols_to_remove = set(cols_to_drop).union(cols_xy)
+            f_sub = f_sub.drop(columns=cols_to_remove, errors="ignore")
+            
+            masker_treshold_file = os.path.expanduser(f'~/datasets/morphopart/masker_quantile_threshold_uvplib.pickle')
+            if os.path.exists(masker_treshold_file):
+                with open(masker_treshold_file, "rb") as f:
+                    masker = pkl.load(f)
+                thresholds = masker.thresholds_
+                f_sub = masker.transform_with_thresholds(f_sub, thresholds=thresholds)
+                
+            else: 
+                masker = MaskExtremeByFeature(dict_para=dict_para,feature_names=feature_names)
+                masker.fit_transform(f_sub.values)
+                # sauvegarder l’objet entier
+                with open(masker_treshold_file, "wb") as f:
+                    pkl.dump(masker, f)
+            
+            f_sub, vars_kept, objs_kept = mask_nan(f_sub, max_var_na=10, max_obj_na=5)
+                
+        #################################################################
+        log.info('	scale data')                                                # Log that feature scaling on the subsampled dataset is starting
         from sklearn.preprocessing import PowerTransformer, StandardScaler              
-        f_yeo = PowerTransformer(method='yeo-johnson').fit_transform(f_sub)     # Perform Yeo-Johnson transformation to normalize dataset (correct distribution)
+        yeo=PowerTransformer(method='yeo-johnson', standardize=False)
+        yeo.fit(f_sub)
+        f_yeo = yeo.transform(f_sub)
         
         scaler = StandardScaler()                                               # Initialize a StandardScaler to standardize features
         scaler.fit(f_yeo)                                                       # Fit the scaler to the Yeo-Johnson transformed data
         f_sub_scaled = scaler.transform(f_yeo)                                  # Transform the data to have zero mean and unit variance 
         # f_sub_scaled.shape
-
+            
         log.info('	impute missing values')                                     # Log that missing values will be imputed
         f_sub_scaled = np.nan_to_num(f_sub_scaled, copy=False)                  # since we have scaled the data, we can simply replace missing values by 0
 
         log.info('	define dimensionality reducer')                             # Log that dimensionality reduction is starting
         if params.dim_reducer == 'PCA':                                         # If PCA is selected as the dimensionality reduction method
             import cuml                                                         # Import RAPIDS cuML for GPU-accelerated PCA
-            dim_reducer = cuml.PCA(n_components=50)                             # Initialize PCA with a maximum of 50 components. Later we will keep only those bringing more than 1% more explained variance
+            n_components_max = min(f_sub.shape[1], 50)                          # Initialize PCA with a maximum of 50 components. Later we will keep only those bringing more than 1% more explained variance
+            dim_reducer = cuml.PCA(n_components=n_components_max)               # Perform PCA
             dim_reducer.fit(f_sub_scaled)                                       # Fit PCA to the scaled data
             expl_var = dim_reducer.explained_variance_ratio_                    # Get the proportion of variance explained by each component
             n_components = np.min(np.where(expl_var < 0.01))                    # Determine the number of components that explain at least 1% variance each
@@ -285,12 +322,21 @@ def reduce_dimension(f_sub, params, log):
         dim_reducer.fit(f_sub_scaled)
 
         log.info('	reduce dimension of features')                              # Log that the feature matrix will now be reduced in dimensionality
-        f_sub_scaled = np.vsplit(f_sub_scaled, 10)                              # Split in chunks to apply the transformation (avoid memory errors on the GPU)
-        f_sub_reduced = [dim_reducer.transform(chunk) for chunk in f_sub_scaled]# Apply the dimensionality reduction to each chunk
-        f_sub_reduced = np.vstack(f_sub_reduced)                                # Stack the reduced chunks back into a single array
+        if params.features =='uvplib':
+            f_sub = subsample_features(f_all, params[step_params], log)
+            f_sub = f_sub[vars_kept]
+            f_sub_scaled= scaler.transform(yeo.transform(f_sub))
+            f_sub_scaled = np.nan_to_num(f_sub_scaled, copy=False)                  # since we have scaled the data, we can simply replace missing values by 0
+ 
+        chunks = np.array_split(f_sub_scaled, 10)        
+        f_sub_reduced = np.vstack([dim_reducer.transform(chunk) for chunk in chunks])
+        
+        #f_sub_scaled = np.vsplit(f_sub_scaled, 10)                              # Split in chunks to apply the transformation (avoid memory errors on the GPU)
+        #f_sub_reduced = [dim_reducer.transform(chunk) for chunk in f_sub_scaled]# Apply the dimensionality reduction to each chunk
+        #f_sub_reduced = np.vstack(f_sub_reduced)                                # Stack the reduced chunks back into a single array
 
         log.info('	write to disk')                                             # Log that the reduced features will be saved to disk
-        output = {'scaler': scaler, 'dim_reducer': dim_reducer, 'features_reduced': f_sub_reduced}
+        output = {'transformer': yeo, 'scaler': scaler, 'dim_reducer': dim_reducer, 'features_reduced': f_sub_reduced, 'features_names': f_sub.columns}
         with open(outfile, 'wb') as f:
             pkl.dump(output, f)                                                 # Save the scaler, dimensionality reducer, and reduced features to a pickle file
 
@@ -327,7 +373,7 @@ def cluster(f_sub_reduced, params, log):
         output = {}
         if params.clust_method=='Kmean_seq':
             
-            log.info('	Clusterer instantiated via the sequential K-means approach')    # Log that Kmean_seq is starting
+            log.info('	Clusterer via the sequential K-means approach')    # Log that Kmean_seq is starting
             import cuml                                                                 # Import RAPIDS cuML for GPU-accelerated Kmean
             for n_clusters in range(2, params.n_clusters_tot + 1):                      # Loop over cluster numbers from 1 to n_clusters_tot
                 clust = cuml.KMeans(n_clusters=n_clusters,                              # Initialize Kmean with a setting the total number of clusters
@@ -346,7 +392,7 @@ def cluster(f_sub_reduced, params, log):
                     
         elif params.clust_method=='Kmean_hclust':
             
-            log.info('	Clusterer instantiated via the K_mean + hierarchical approach')
+            log.info('	Clusterer via the K_mean + hierarchical approach')
             import cuml                                                         # Import RAPIDS cuML for GPU-accelerated Kmean
             clust = cuml.KMeans(n_clusters=params.n_clusters_tot,               # Initialize Kmean with a setting the total number of clusters
                            init='scalable-k-means++', n_init=10,                # Use scalable KMeans++ initialization and the algorithm will be run 10 times with different centroid seeds
@@ -364,7 +410,7 @@ def cluster(f_sub_reduced, params, log):
         
         elif params.clust_method=='Kmean_bisecting':
             
-            log.info('	Clusterer instantiated via the the bissecting k-means approach')    # Log that Bisecting_Kmean is starting
+            log.info('	Clusterer via the the bissecting k-means approach')    # Log that Bisecting_Kmean is starting
             clust = BisectingKMeansTree(                                                    # Initialize the BisectingKMeansTree clusterer
                     n_clusters=params.n_clusters_tot,                                       # Current number of clusters
                     n_init=10,                                                              # Number of centroid seeds
@@ -455,16 +501,18 @@ def transform_features(f_all, dimred, params, log):
         with open(outfile, 'rb') as f:
             f_all_reduced = pkl.load(f)                                     # Load full data, reduced features based on the subsample
     else :
-        if params['n_obj_sub'] == params['n_obj_max']:                      # Similarly, when n_obj_sub = n_obj_max, we would do the same thing twice
+        if (params['n_obj_sub'] == params['n_obj_max'] and params['features'] != 'uvplib'):                      # Similarly, when n_obj_sub = n_obj_max, we would do the same thing twice
             log.info('	read already reduced features')                     # Log that the dimensionality reduction has already been done on the full data
             f_all_reduced = dimred['features_reduced']                      # Store the full data, reduced features based on the subsample in 'f_all_reduced'
         else:
             log.info('	reduce all features based on current subsample')
             
+            if params.features =='uvplib':                                          # Clean dataset before transformer and scaler for dimensional reduction
+                f_all=f_all[dimred['features_names']]
+                
             from sklearn.preprocessing import PowerTransformer, StandardScaler
         
-            f_yeo = PowerTransformer(method='yeo-johnson').fit_transform(f_all)     # Perform Yeo-Johnson transformation to normalize dataset (correct distribution)
-            
+            f_yeo = dimred['transformer'].transform(f_all)                        # Perform Yeo-Johnson transformation to normalize            
             f_all_scaled = dimred['scaler'].transform(f_yeo)                        # Transform the data to have zero mean and unit variance 
             f_all_scaled = np.nan_to_num(f_all_scaled, copy=False)                  # since we have scaled the data, we can simply replace missing values by 0
 
@@ -553,7 +601,7 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
             print('Error all object in the reduced space cannot be predict')
         
         # --------------------------------------------------------------------
-        # Compute ARI (Adjusted Rand Index)                                     # Range: -1 to 1 -> 1: Perfect agreement — the two clusterings are identical; 0: Random clustering — the agreement is what you’d expect by chance; Negative: Worse than random — clusters are anti-correlated with true labels.
+        # Compute ARI (Adjusted Rand Index)                                    # Range: -1 to 1 -> 1: Perfect agreement — the two clusterings are identical; 0: Random clustering — the agreement is what you’d expect by chance; Negative: Worse than random — clusters are anti-correlated with true labels.
         # --------------------------------------------------------------------
         log.info('	compute ARI score')                                                                                      # Log that Adjusted Rand Index computation is starting
         from sklearn.metrics.cluster import adjusted_rand_score                                                             # Import the ARI metric from scikit-learn --> CPU
@@ -562,6 +610,13 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
         # NOTE: The cuML ARI function is commented out here because on large datasets, it can produce incorrect or extremely large/small ARI values due to GPU float32 precision and overflow issues. Sometimes ARI_score reached -495 ...
         #from cuml.metrics.cluster.adjusted_rand_index import adjusted_rand_score                                             # Import the GPU-accelerated Adjusted Rand Index (ARI) function from cuML
         #score_ARI = adjusted_rand_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)      # Compute the ARI score between reference and predicted clusters. Note: ARI can occasionally return negative values if the clustering is worse than random
+        
+        # --------------------------------------------------------------------
+        # Compute NMI (Normalized Mutual Information)                                    # Range: 0 to 1 -> 1: one clustering fully predicts the other; 0: knowing a point’s cluster in A tells you nothing at all about its cluster in B.
+        # --------------------------------------------------------------------
+        log.info('	compute NMI score')                                                                                               # Log that Adjusted Rand Index computation is starting
+        from sklearn.metrics.cluster import normalized_mutual_info_score                                                              # Import the ARI metric from scikit-learn --> CPU
+        score_NMI = normalized_mutual_info_score(c_all_ref[params.n_clusters_eval].values, c_all[params.n_clusters_eval].values)      # Compute the Adjusted Rand Index between reference and predicted clusters
         
         del c_all_ref                                                                                                         # Clean up temporary DataFrames to free memory
         # --------------------------------------------------------------------
@@ -652,7 +707,6 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
             return purity
         
         purity_score = compute_purity(c_all, cluster_col=params.n_clusters_eval, label_col='taxon')                         # Compute the purity score
-        print(f"Purity of clustering: {purity_score:.3f}")
         
         # --------------------------------------------------------------------
         # TODO Compute ecological index (Simspons/Shannon)                      Shannon index: Higher → more diverse; Simpson index: Higher → less dominance; 
@@ -680,7 +734,6 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
             return (sh_entropy, Si_index)                                                                   # Return both diversity metrics
             
         clust_diversity_indices=[[cluster_id, diversity_index(list(c_all[c_all[params.n_clusters_eval]==cluster_id]["taxon"]))] for cluster_id in np.unique(c_all[params.n_clusters_eval].values)]  # Compute diversity indices for each cluster
-        print(clust_diversity_indices)                                                                      # Print the computed diversity indices for inspection                                                                      
         
         # --------------------------------------------------------------------
         # Compute Compacity index                                                # Range 0 to +∞ -> 0: clusters are tight and compact; high values: clusters are spread out / loose
@@ -711,7 +764,6 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
             return overall_compacity                                                                        # Return the final score
 
         compacity_score = compute_compacity(f_all_reduced, c_all[params.n_clusters_eval].values)            # Compute the overall compacity of clusters in the reduced feature space
-        print(f"Overall cluster compacity: {compacity_score:.3f}")                                          # Print the overall compacity score
         
         # --------------------------------------------------------------------
         # Save all metrics
@@ -719,7 +771,8 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
         log.info('	write to disk')                                                                         # Log that the metrics will be saved to disk
         if sum(np.isnan(SILs))>0:                                                                           # Check if any Silhouette scores are NaN
             results = dict(params) | {                                                                      # Start with parameters dictionary and merge evaluation metrics
-                'ARI': score_ARI,                                                                           # Adjusted Rand Index for clustering vs reference
+                'ARI': score_ARI,                                                                           # Adjusted Rand Index
+                'NMI': score_NMI,                                                                           # Normalized Mutual Information
                 'n_obj_eval_actual': len(eval_subsamples[0]),                                               # Record the actual number of objects in the evaluation subsample. Note: Some subsamples may be smaller than params.n_obj_eval if clusters are small
                 #'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),                                            # DBCV metrics
                 'SIL': np.mean([~np.isnan(SILs)]), 'sdSIL': np.std([~np.isnan(SILs)]), 'nanSIL': sum(np.isnan(SILs)), # Silhouette score metrics
@@ -729,7 +782,8 @@ def evaluate(f_all, f_all_reduced, clust, tree, f_all_reduced_ref, clusters_ref,
             }
         else:
             results = dict(params) | {                                                                      # Start with parameters dictionary and merge evaluation metrics
-                'ARI': score_ARI,                                                                           # Adjusted Rand Index for clustering vs reference
+                'ARI': score_ARI,                                                                           # Adjusted Rand Index
+                'NMI': score_NMI,                                                                           # Normalized Mutual Information
                 'n_obj_eval_actual': len(eval_subsamples[0]),                                               # Record the actual number of objects in the evaluation subsample. Note: Some subsamples may be smaller than params.n_obj_eval if clusters are small
                 #'DBCV': np.mean(DBCVs), 'sdDBCV': np.std(DBCVs),
                 'SIL': np.mean(SILs), 'sdSIL': np.std(SILs), 'nanSIL': sum(np.isnan(SILs)),                 # Silhouette score metrics
@@ -1408,13 +1462,6 @@ def sample_stratified_continuous(n, size, by, **kwargs):
     return(idx)
 
 
-import numpy as np
-
-from sklearn.cluster import BisectingKMeans
-from sklearn.utils.validation import check_is_fitted
-from sklearn.utils.extmath import row_norms
-from sklearn.cluster._kmeans import _labels_inertia_threadpool_limit
-
 class BisectingKMeansTree(BisectingKMeans):                                                     # define a new class BisectingKMeansTree that inherits from BisectingKMeans
     import numpy as np
 
@@ -1507,3 +1554,119 @@ class BisectingKMeansTree(BisectingKMeans):                                     
 
         return labels
 
+
+class MaskExtremeByFeature(BaseEstimator, TransformerMixin):
+    def __init__(self, dict_para, feature_names, iqr_factor=1.5):
+        """
+        dict_para : dict {feature: [low%, high%] or None}
+        feature_names : liste des colonnes dans l'ordre de X
+        iqr_factor : multiplicateur IQR pour features None (default 1.5)
+        """
+        self.dict_para = dict_para
+        self.feature_names = feature_names
+        self.iqr_factor = iqr_factor
+        self.lower_ = None
+        self.upper_ = None
+        self.thresholds_ = None
+        self.masked_percent_ = None
+
+    def fit(self, X, y=None):
+        X = np.asarray(X, dtype=float)
+        n_features = X.shape[1]
+
+        self.lower_ = np.full(n_features, -np.inf)
+        self.upper_ = np.full(n_features, np.inf)
+        self.masked_percent_ = np.zeros(n_features)
+
+        for j, feat in enumerate(self.feature_names):
+            params = self.dict_para.get(feat, None)
+
+            if params is None:
+                # Masquage IQR pour les features None
+                Q1 = np.nanpercentile(X[:, j], 25)
+                Q3 = np.nanpercentile(X[:, j], 75)
+                IQR = Q3 - Q1
+                self.lower_[j] = Q1 - self.iqr_factor * IQR
+                self.upper_[j] = Q3 + self.iqr_factor * IQR
+            else:
+                low_p, high_p = params
+                low_q  = low_p / 100
+                high_q = high_p / 100
+                self.lower_[j] = np.nanquantile(X[:, j], low_q)
+                self.upper_[j] = np.nanquantile(X[:, j], 1 - high_q)
+
+        # sauvegarde seuils dans dict pour usage externe
+        self.thresholds_ = {feat: (self.lower_[j], self.upper_[j])
+                            for j, feat in enumerate(self.feature_names)}
+        return self
+
+    def transform(self, X):
+        X = np.asarray(X, dtype=float)
+        X_masked = X.copy()
+        mask_total = np.zeros_like(X_masked, dtype=bool)
+
+        for j in range(X_masked.shape[1]):
+            mask = (X_masked[:, j] < self.lower_[j]) | (X_masked[:, j] > self.upper_[j])
+            X_masked[mask] = np.nan
+            mask_total[:, j] = mask
+
+        # calcul du pourcentage de valeurs masquées par feature
+        self.masked_percent_ = mask_total.sum(axis=0) / X.shape[0] * 100
+
+        return X_masked
+
+    def transform_with_thresholds(self, X, thresholds=None):
+        if thresholds is None:
+            thresholds = self.thresholds_
+
+        # Assurer que X est un DataFrame
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X, columns=self.feature_names)
+    
+        X_masked = X.copy()
+        mask_total = pd.DataFrame(False, index=X.index, columns=X.columns)
+
+        for feat in self.feature_names:
+            lower, upper = thresholds.get(feat, (-np.inf, np.inf))
+            mask = (X_masked[feat] < lower) | (X_masked[feat] > upper)
+            X_masked.loc[mask, feat] = np.nan
+            mask_total.loc[mask, feat] = True
+
+        self.masked_percent_ = mask_total.sum() / len(X) * 100
+
+        return X_masked
+
+def mask_nan(df, max_var_na=10, max_obj_na=5):
+    """
+    Remove variables and objects with too many NaNs.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+    max_var_na : float
+        Maximum allowed % of NaNs per variable.
+    max_obj_na : int
+        Maximum allowed number of NaNs per object (row).
+    
+    Returns
+    -------
+    df_masked : pd.DataFrame
+        Filtered DataFrame (NaNs preserved).
+    selected_vars : pd.Index
+        Kept variables.
+    selected_objs : pd.Index
+        Kept objects.
+    """
+
+    # 1. Variables (columns)
+    mask_vars = (df.isna().mean(axis=0) * 100) < max_var_na
+    selected_vars = df.columns[mask_vars]
+
+    # 2. Objects (rows)
+    mask_objs = df[selected_vars].isna().sum(axis=1) <= max_obj_na
+    selected_objs = df.index[mask_objs]
+
+    # 3. Subset
+    df_masked = df.loc[selected_objs, selected_vars]
+
+    return df_masked, selected_vars, selected_objs

@@ -111,11 +111,11 @@ params_grid = expand_grid({
 
 params_grid = expand_grid({
     'instrument': ['uvp5sd'],
-    'features': ['mobilenet'],
-    'n_obj_max': [20000],
-    'replicate': [1],
-    'n_obj_sub': [20000, 10000, 1000, 500],
-    'dim_reducer': ['PCA'],
+    'features': ['mobilenet', 'dino', 'uvplib'],
+    'n_obj_max': [200000],
+    'replicate': [1, 2, 3],
+    'n_obj_sub': [200000, 180000, 160000, 140000, 120000, 100000, 80000],
+    'dim_reducer': ['PCA', 'UMAP'],
     'clust_method': ['Kmean_seq','Kmean_hclust','Kmean_bisecting'],
     'n_clusters_tot': [200],
     'linkage': ['ward','average'],
@@ -123,10 +123,13 @@ params_grid = expand_grid({
     'n_obj_eval': [100000]
 })
 params_grid.loc[params_grid['clust_method'] != 'Kmean_hclust', ['linkage']] = 'NaN'        # Disable irrelevant params for non-hclust methods
-params_grid = params_grid.drop_duplicates().reset_index(drop=True)                                           # Remove duplicates created by disabling parameters
+params_grid = params_grid.drop_duplicates().reset_index(drop=True)                         # Remove duplicates created by disabling parameters
 
 # Perform only one replicate in case n_obj_sub = n_obj_max.
 params_grid = params_grid[
     (params_grid['n_obj_sub'] != params_grid['n_obj_max']) |
     ((params_grid['n_obj_sub'] == params_grid['n_obj_max']) & (params_grid['replicate'] == 1))
 ].reset_index(drop=True)
+
+
+

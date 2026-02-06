@@ -18,7 +18,7 @@ import pandas as pd
 ## Prepare output ----
 
 # create output directory
-os.makedirs(os.path.expanduser('~/datasets/morphopart/out_yeo'), exist_ok=True)
+os.makedirs(os.path.expanduser('~/datasets/morphopart/out_test'), exist_ok=True)
 
 # log to a file and to the console
 log_format = logging.Formatter('%(asctime)s	%(message)s')
@@ -46,7 +46,7 @@ directory= '~/datasets/morphopart'
 # one row is one set of parameters for which there will be performance metrics
 
 # read parameters
-params_grid = pd.read_csv('params_grid.csv')
+#params_grid = pd.read_csv('params_grid.csv')
 # we will go through each row, within a loop
 
 # initialise a Series which will hold the values of the previous execution loop
@@ -62,7 +62,7 @@ for i in range(params_grid.shape[0]):
 
     # skip the computation if the result is already computed
     results_file = os.path.expanduser(
-        f'~/datasets/morphopart/out_test/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
+        f'~/datasets/morphopart/out_test/eval__{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_sub}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}_{params.linkage}_{params.n_clusters_eval}_{params.n_obj_eval}.csv'
     )
     if os.path.exists(results_file):
         log.info('	skip: everything done') # ----
@@ -137,7 +137,7 @@ for i in range(params_grid.shape[0]):
         log.info('	load reference dimensionality reduction')
         dimred_ref_file = os.path.expanduser(
             '~/datasets/morphopart/out_test/dimred__'
-            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}'
+            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_1_{params.dim_reducer}'
             '.pickle'
         )
         with open(dimred_ref_file, 'rb') as f:
@@ -150,7 +150,7 @@ for i in range(params_grid.shape[0]):
         log.info('	load reference clustering')
         cluster_ref_file = os.path.expanduser(
             '~/datasets/morphopart/out_test/clust__'
-            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}'
+            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_1_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}'
             '.pickle'
         )
         with open(cluster_ref_file, 'rb') as f:
@@ -163,7 +163,7 @@ for i in range(params_grid.shape[0]):
         log.info('	load reference cluster tree')
         tree_ref_file = os.path.expanduser(
             '~/datasets/morphopart/out_test/tree__'
-            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_{params.replicate}_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}_{params.linkage}'
+            f'{params.instrument}_{params.features}_{params.n_obj_max}_{params.n_obj_max}_1_{params.dim_reducer}_{params.clust_method}_{params.n_clusters_tot}_{params.linkage}'
             '.pickle'
         )
         with open(tree_ref_file, 'rb') as f:
